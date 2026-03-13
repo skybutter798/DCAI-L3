@@ -1,0 +1,8 @@
+{
+  "epochId": 2026031311,
+  "dayId": 20260313,
+  "claims": [
+    {"operator": "0xD3A120011D0cD915E6df918B2c607B6d0B7522Fb", "amountWei": "1000000000000000000"},
+    {"operator": "0x80189D1f1a2b15c1bb1cb1b20d68c777823a8079", "amountWei": "2000000000000000000"}
+  ]
+}
