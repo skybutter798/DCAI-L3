@@ -1,0 +1,10 @@
+{
+  "name": "dcai-faucet",
+  "version": "0.1.0",
+  "main": "server.js",
+  "type": "module",
+  "dependencies": {
+    "ethers": "^6.13.5",
+    "express": "^4.19.2"
+  }
+}

@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: blockscout
+      POSTGRES_PASSWORD: blockscout
+      POSTGRES_DB: blockscout
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  blockscout:
+    image: blockscout/blockscout:latest
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "postgresql://blockscout:blockscout@postgres:5432/blockscout?ssl=false"
+      ECTO_USE_SSL: "false"
+      NETWORK: "DCAI"
+      SUBNETWORK: "Testnet"
+      CHAIN_ID: "18441"
+      COIN: "tDCAI"
+      ETHEREUM_JSONRPC_VARIANT: "geth"
+      ETHEREUM_JSONRPC_HTTP_URL: "http://139.180.188.61:8545"
+      ETHEREUM_JSONRPC_WS_URL: "ws://139.180.188.61:8546"
+      ETHEREUM_JSONRPC_TRACE_URL: "http://139.180.188.61:8545"
+      MIX_ENV: "prod"
+      PORT: "4000"
+      BLOCKSCOUT_HOST: "139.180.140.143"
+    command: ["bin/blockscout", "start"]
+    ports:
+      - "4000:4000"
+
+  frontend:
+    image: ghcr.io/blockscout/frontend:latest
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_HOST: "139.180.140.143:4000"
+      NEXT_PUBLIC_API_PROTOCOL: "http"
+      NEXT_PUBLIC_API_BASE_PATH: "/"
+      NEXT_PUBLIC_API_WEBSOCKET_PROTOCOL: "ws"
+      NEXT_PUBLIC_APP_HOST: "139.180.140.143"
+      NEXT_PUBLIC_APP_PROTOCOL: "http"
+      NEXT_PUBLIC_NETWORK_NAME: "DCAI Testnet"
+      NEXT_PUBLIC_NETWORK_SHORT_NAME: "DCAI"
+      NEXT_PUBLIC_NETWORK_ID: "18441"
+      NEXT_PUBLIC_NETWORK_CURRENCY_NAME: "tDCAI"
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: "tDCAI"
+      NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS: "18"
+      NEXT_PUBLIC_IS_TESTNET: "true"
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

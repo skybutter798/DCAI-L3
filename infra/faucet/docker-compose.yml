@@ -1,0 +1,14 @@
+services:
+  faucet:
+    image: node:20-alpine
+    working_dir: /app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+    volumes:
+      - ./app:/app
+    command: sh -lc "npm install --omit=dev && node server.js"
+    ports:
+      - "8080:8080"
