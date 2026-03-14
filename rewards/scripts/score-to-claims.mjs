@@ -79,7 +79,7 @@ function scoreStorage(m) {
 function scoreMultiregion(m) {
   const ok = m?.regions_ok ?? 0;
   const req = m?.regions_required ?? 1;
-  return clamp(ok / req, 0, 1);
+  return ok >= req ? 1 : 0;
 }
 
 function totalScore(op) {

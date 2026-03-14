@@ -98,7 +98,7 @@ serviceScore_storage = A * (0.6*I + 0.4*E)
 ### Multi-region serviceScore
 
 ```
-serviceScore_multiregion = clamp(regions_ok / regions_required, 0, 1)
+serviceScore_multiregion = (regions_ok >= regions_required) ? 1 : 0
 ```
 
 ### Total operator score
