@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DCAI Rewards</title>
+  <style>
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;max-width:900px;margin:24px auto;padding:0 14px;}
+    .card{border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin:12px 0;}
+    code{background:#f3f4f6;padding:2px 6px;border-radius:6px;}
+    table{width:100%;border-collapse:collapse;}
+    th,td{border-bottom:1px solid #eee;padding:8px;text-align:left;font-size:14px;}
+    .muted{color:#6b7280;font-size:13px;}
+    .err{color:#b91c1c;}
+  </style>
+</head>
+<body>
+  <h1>Rewards</h1>
+  <div class="muted">This page reads <a href="./latest.json">latest.json</a> (updated by the publisher cron).</div>
+
+  <div id="status" class="card">Loading...</div>
+  <div id="claims" class="card"></div>
+
+<script>
+async function main(){
+  const statusEl = document.getElementById('status');
+  const claimsEl = document.getElementById('claims');
+  try{
+    const r = await fetch('./latest.json', {cache:'no-store'});
+    if(!r.ok){
+      statusEl.innerHTML = `<div class='err'>No latest.json yet (HTTP ${r.status})</div>`;
+      claimsEl.innerHTML = '';
+      return;
+    }
+    const data = await r.json();
+    statusEl.innerHTML = `
+      <div><b>epochId</b>: <code>${data.epochId}</code></div>
+      <div><b>dayId</b>: <code>${data.dayId}</code></div>
+      <div><b>merkleRoot</b>: <code>${data.merkleRoot}</code></div>
+      <div><b>totalWei</b>: <code>${data.totalWei}</code></div>
+      <div class='muted'>Tip: operators use the proof list below to claim.</div>
+    `;
+
+    const claims = data.claims || [];
+    let html = `<h2>Claims (${claims.length})</h2>`;
+    html += `<table><thead><tr><th>operator</th><th>amountWei</th><th>proofLen</th></tr></thead><tbody>`;
+    for(const c of claims){
+      html += `<tr><td><code>${c.operator}</code></td><td><code>${c.amountWei}</code></td><td>${(c.proof||[]).length}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+    claimsEl.innerHTML = html;
+  }catch(e){
+    statusEl.innerHTML = `<div class='err'>Error: ${e.message || e}</div>`;
+    claimsEl.innerHTML = '';
+  }
+}
+main();
+</script>
+</body>
+</html>

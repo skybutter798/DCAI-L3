@@ -27,9 +27,13 @@ This is a private-chain, admin-driven rewards system.
 1. Off-chain scoring decides `amountWei` per operator for an epoch
 2. Generate merkle root + proofs
    - Use `rewards/scripts/build-epoch.mjs`
-3. Publish on-chain:
-   - `distributor.publishEpoch(epochId, dayId, merkleRoot, totalWei)`
-   - Must satisfy: `dailySpent + totalWei <= dailyCap`
+3. Publish on-chain (two options):
+   - **Hardhat**: `hardhat run scripts/publish-epoch.js`
+   - **Ethers-only (recommended for ops servers)**: `rewards/scripts/publish-onchain.mjs`
+
+Constraints:
+- `dailySpent + totalWei <= dailyCap`
+- `epochId` must be unique (or you will get `EPOCH_EXISTS`)
 
 ## Claiming
 
