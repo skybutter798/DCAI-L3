@@ -129,6 +129,18 @@ async function probeIndexer(blockscoutApiBase, chainHeight, timeoutMs, samples) 
   };
 }
 
+
+async function probeMultiregion(urls, timeoutMs) {
+  const results = [];
+  for (const u of urls) {
+    const res = await rpcCall(u, 'eth_blockNumber', [], timeoutMs);
+    results.push(res.ok);
+  }
+  const regions_ok = results.filter(Boolean).length;
+  const regions_required = urls.length;
+  return { regions_ok, regions_required };
+}
+
 async function main() {
   const epochId = Number(arg('--epochId', new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')));
   const dayId = Number(arg('--dayId', new Date().toISOString().slice(0,10).replace(/-/g,'')));
@@ -168,7 +180,12 @@ async function main() {
       }
     }
 
-    // Placeholders for storage/multiregion.
+    if (op.services?.multiregion) {
+      const urls = endpoints.multiregion || [];
+      metrics.multiregion = await probeMultiregion(urls, timeoutMs);
+    }
+
+    // Placeholders for storage.
 
     outOps.push({
       operator: op.operator,
