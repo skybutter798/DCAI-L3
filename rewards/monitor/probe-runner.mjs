@@ -73,6 +73,62 @@ async function probeRpc(url, timeoutMs, methods, samples) {
   };
 }
 
+
+async function httpGetJson(url, timeoutMs) {
+  const t0 = performance.now();
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    const text = await r.text();
+    const dt = performance.now() - t0;
+    if (!r.ok) return { ok: false, ms: dt, err: 'HTTP_' + r.status };
+    let j;
+    try { j = JSON.parse(text); } catch { return { ok: false, ms: dt, err: 'BAD_JSON' }; }
+    return { ok: true, ms: dt, json: j };
+  } catch (e) {
+    const dt = performance.now() - t0;
+    return { ok: false, ms: dt, err: (e?.name === 'AbortError') ? 'TIMEOUT' : 'FETCH_ERR' };
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+async function probeIndexer(blockscoutApiBase, chainHeight, timeoutMs, samples) {
+  // Uses Blockscout API v2: /api/v2/blocks
+  const url = blockscoutApiBase.endsWith('/') ? (blockscoutApiBase + 'api/v2/blocks') : (blockscoutApiBase + '/api/v2/blocks');
+  let total = 0;
+  let ok = 0;
+  let msOk = [];
+  let errors = 0;
+  let bestHeight = null;
+
+  for (let i = 0; i < samples; i++) {
+    total++;
+    const res = await httpGetJson(url, timeoutMs);
+    if (res.ok) {
+      ok++;
+      msOk.push(res.ms);
+      const h = res.json?.items?.[0]?.height;
+      if (typeof h === 'number') bestHeight = (bestHeight === null) ? h : Math.max(bestHeight, h);
+    } else {
+      errors++;
+    }
+  }
+
+  const uptime = total === 0 ? 0 : ok / total;
+  const p95ms = p95(msOk);
+  const errorRate = total === 0 ? 1 : errors / total;
+  const lagBlocks = (bestHeight === null) ? 1e9 : Math.max(0, chainHeight - bestHeight);
+
+  return {
+    uptime: clamp(uptime, 0, 1),
+    p95_ms: p95ms ?? 999999,
+    error_rate: clamp(errorRate, 0, 1),
+    lag_blocks: lagBlocks
+  };
+}
+
 async function main() {
   const epochId = Number(arg('--epochId', new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')));
   const dayId = Number(arg('--dayId', new Date().toISOString().slice(0,10).replace(/-/g,'')));
@@ -81,6 +137,10 @@ async function main() {
   const timeoutMs = rpcDefaults.timeoutMs ?? 2000;
   const methods = rpcDefaults.methods ?? [{ name: 'eth_blockNumber', params: [] }];
   const samples = rpcDefaults.samplesPerEpoch ?? 10;
+
+  const indexerCfg = cfg.indexer || {};
+  const indexerEnabled = indexerCfg.enabled !== false;
+  const blockscoutBase = indexerCfg.url || "http://127.0.0.1:4000";
 
   const operators = cfg.operators ?? [];
 
@@ -98,7 +158,17 @@ async function main() {
       }
     }
 
-    // Placeholders for indexer/storage/multiregion: add when endpoints and metrics are defined.
+    if (op.services?.indexer) {
+      if (!indexerEnabled) {
+        metrics.indexer = { uptime: 0, p95_ms: 999999, error_rate: 1, lag_blocks: 1e9, note: "indexer disabled" };
+      } else {
+        // if chainHeight unknown, treat lag as large
+        const ch = (typeof chainHeight === "number") ? chainHeight : 0;
+        metrics.indexer = await probeIndexer(blockscoutBase, ch, timeoutMs, Math.max(1, Math.floor(samples / 2)));
+      }
+    }
+
+    // Placeholders for storage/multiregion.
 
     outOps.push({
       operator: op.operator,
