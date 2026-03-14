@@ -43,13 +43,7 @@ function p95(values) {
   return a[idx];
 }
 
-async function probeRpc() {
-  const c = cfg.rpc;
-  const url = c.url;
-  const timeoutMs = c.timeoutMs ?? 2000;
-  const methods = c.methods ?? [{ name: 'eth_blockNumber', params: [] }];
-  const samples = c.samplesPerEpoch ?? 10;
-
+async function probeRpc(url, timeoutMs, methods, samples) {
   let total = 0;
   let ok = 0;
   let msOk = [];
@@ -83,25 +77,37 @@ async function main() {
   const epochId = Number(arg('--epochId', new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')));
   const dayId = Number(arg('--dayId', new Date().toISOString().slice(0,10).replace(/-/g,'')));
 
+  const rpcDefaults = cfg.rpc || {};
+  const timeoutMs = rpcDefaults.timeoutMs ?? 2000;
+  const methods = rpcDefaults.methods ?? [{ name: 'eth_blockNumber', params: [] }];
+  const samples = rpcDefaults.samplesPerEpoch ?? 10;
+
   const operators = cfg.operators ?? [];
 
-  // Note: v0.1 uses unified entry probing. Per-operator differentiation requires
-  // per-operator endpoints (or a gateway that can route by key/host).
-  const rpcMetrics = await probeRpc();
+  const outOps = [];
+  for (const op of operators) {
+    const endpoints = op.endpoints || {};
+    const metrics = {};
 
-  const out = {
-    epochId,
-    dayId,
-    operators: operators.map((op) => ({
+    if (op.services?.rpc) {
+      const url = endpoints.rpc;
+      if (!url) {
+        metrics.rpc = { uptime: 0, p95_ms: 999999, error_rate: 1, note: 'missing endpoints.rpc' };
+      } else {
+        metrics.rpc = await probeRpc(url, timeoutMs, methods, samples);
+      }
+    }
+
+    // Placeholders for indexer/storage/multiregion: add when endpoints and metrics are defined.
+
+    outOps.push({
       operator: op.operator,
       services: op.services,
-      metrics: {
-        rpc: op.services?.rpc ? rpcMetrics : undefined,
-        // placeholders for future: indexer/storage/multiregion
-      }
-    }))
-  };
+      metrics
+    });
+  }
 
+  const out = { epochId, dayId, operators: outOps };
   fs.writeFileSync(outPath, JSON.stringify(out, null, 2));
   console.log('wrote', outPath);
 }
