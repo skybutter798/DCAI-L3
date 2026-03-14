@@ -1,0 +1,33 @@
+{
+  "rpc": {
+    "url": "http://139.180.140.143/rpc/<KEY>/",
+    "timeoutMs": 2000,
+    "samplesPerEpoch": 10,
+    "methods": [
+      {"name": "eth_chainId", "params": []},
+      {"name": "eth_blockNumber", "params": []},
+      {"name": "net_peerCount", "params": []}
+    ]
+  },
+  "indexer": {
+    "enabled": false,
+    "url": "http://139.180.140.143:4000/api/v2/health"
+  },
+  "storage": {
+    "enabled": false,
+    "url": "http://<STORAGE_ENDPOINT>/health"
+  },
+  "multiregion": {
+    "enabled": false,
+    "regions": [
+      {"name": "rpc1", "url": "http://139.180.140.143/rpc1/"},
+      {"name": "rpc2", "url": "http://139.180.140.143/rpc2/"}
+    ]
+  },
+  "operators": [
+    {
+      "operator": "0x6B876620391BD2A1281247B1fC15ae4994D50663",
+      "services": {"rpc": true, "indexer": true, "storage": true, "multiregion": true}
+    }
+  ]
+}
