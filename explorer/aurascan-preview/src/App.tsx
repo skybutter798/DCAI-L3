@@ -1,0 +1,870 @@
+import { motion, AnimatePresence } from 'motion/react';
+import { useState, useEffect, useRef } from 'react';
+import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info } from 'lucide-react';
+
+const generateHash = (length = 40) => '0x' + Array.from({length}, () => Math.floor(Math.random()*16).toString(16)).join('');
+
+const generateBlock = (height: number) => ({
+  height,
+  hash: generateHash(64),
+  miner: 'DCAINode_' + Math.floor(Math.random() * 999).toString().padStart(3, '0'),
+  txCount: Math.floor(Math.random() * 500) + 50,
+  time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+  reward: (Math.random() * 10 + 2).toFixed(2)
+});
+
+const generateBlockDetails = (baseBlock: any) => ({
+  ...baseBlock,
+  status: 'FINALIZED',
+  confirmations: Math.floor(Math.random() * 1000) + 120,
+  size: (Math.random() * 50 + 10).toFixed(2) + ' KB',
+  gasUsed: Math.floor(Math.random() * 15000000),
+  gasLimit: 30000000,
+  parentHash: generateHash(64),
+  stateRoot: generateHash(64),
+  nonce: '0x' + Math.floor(Math.random() * 1000000000000000).toString(16)
+});
+
+const generateTx = () => ({
+  hash: generateHash(64),
+  from: generateHash(40),
+  to: generateHash(40),
+  value: (Math.random() * 1000).toFixed(2),
+  fee: (Math.random() * 0.01).toFixed(4),
+  time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+});
+
+const CursorFollower = () => {
+  const [pos, setPos] = useState({ x: -100, y: -100 });
+  
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      setPos({ x: e.clientX, y: e.clientY });
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  return (
+    <motion.div
+      className="fixed top-0 left-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-[100px] pointer-events-none z-50"
+      animate={{ x: pos.x - 192, y: pos.y - 192 }}
+      transition={{ type: 'tween', ease: 'backOut', duration: 0.5 }}
+    />
+  );
+};
+
+const Header = ({ onHome }: { onHome: () => void }) => (
+  <header className="sticky top-0 z-40 bg-dark-900/80 backdrop-blur-md border-b border-gold-500/20">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div className="flex items-center gap-3 cursor-pointer group" onClick={onHome}>
+        <div className="w-8 h-8 rounded bg-gold-500 flex items-center justify-center shadow-[0_0_10px_#FFD700] group-hover:shadow-[0_0_20px_#FFD700] transition-shadow">
+          <Cpu className="w-5 h-5 text-dark-900" />
+        </div>
+        <span className="font-black text-xl tracking-widest glow-text">DCAI<span className="text-cyan-400 glow-text-cyan">L3</span></span>
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1 ml-4 rounded-full border border-cyan-500/30 bg-cyan-500/10">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+          </span>
+          <span className="text-[10px] font-mono font-bold tracking-widest text-cyan-400">MAINNET</span>
+        </div>
+      </div>
+      
+      <nav className="hidden md:flex items-center gap-8">
+        {['BLOCKS', 'TRANSACTIONS', 'TOKENS', 'NODES', 'API'].map(item => (
+          <a key={item} href="#" className="text-sm font-mono text-gold-500/70 hover:text-cyan-400 hover:glow-text-cyan transition-all">
+            {item}
+          </a>
+        ))}
+      </nav>
+
+      <div className="flex items-center gap-4">
+        <button className="glow-box px-4 py-1.5 rounded text-xs font-mono font-bold hover:bg-cyan-500 hover:text-dark-900 hover:shadow-[0_0_15px_#00F0FF] transition-all border-cyan-500/50 text-cyan-400">
+          CONNECT WALLET
+        </button>
+      </div>
+    </div>
+  </header>
+);
+
+const Hero = () => (
+  <div className="py-20 flex flex-col items-center justify-center text-center relative">
+    <motion.div
+      initial={{ scale: 0.8, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={{ duration: 1, ease: "easeOut" }}
+      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-500/5 rounded-full blur-3xl pointer-events-none"
+    />
+    
+    <motion.div
+      initial={{ y: 20, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      className="relative z-10 mb-8"
+    >
+      <h1 className="text-5xl md:text-7xl font-black tracking-tighter mb-4">
+        DCAI <span className="glow-text-cyan text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 to-cyan-600">FOUNDATION</span>
+      </h1>
+      <p className="font-mono text-gold-500/60 max-w-2xl mx-auto">
+        EXPLORE THE DCAI L3 NETWORK. REAL-TIME DATA STREAMING. UNCOMPROMISED SECURITY.
+      </p>
+    </motion.div>
+
+    <motion.div
+      initial={{ y: 20, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ delay: 0.2 }}
+      className="w-full max-w-3xl relative z-10 group px-4"
+    >
+      <div className="absolute -inset-1 bg-gradient-to-r from-gold-600 via-cyan-500 to-gold-400 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
+      <div className="relative flex items-center bg-dark-800/90 backdrop-blur-sm border border-cyan-500/40 rounded-xl p-2 shadow-[0_0_30px_rgba(0,240,255,0.1)]">
+        <div className="pl-4 pr-2">
+          <Search className="w-6 h-6 text-cyan-400" />
+        </div>
+        <input
+          type="text"
+          placeholder="Search by Address / Txn Hash / Block / Token..."
+          className="w-full bg-transparent border-none outline-none text-gold-500 placeholder-gold-500/40 font-mono text-sm sm:text-lg py-3"
+        />
+        <button className="bg-cyan-500 text-dark-900 px-4 sm:px-8 py-3 rounded-lg font-bold font-mono hover:bg-cyan-400 transition-colors shadow-[0_0_15px_rgba(0,240,255,0.5)]">
+          SCAN
+        </button>
+      </div>
+    </motion.div>
+  </div>
+);
+
+const Stats = () => {
+  const [stats, setStats] = useState<any>(null);
+  const [latestBlock, setLatestBlock] = useState<number | null>(null);
+  const [txTodayLive, setTxTodayLive] = useState<number | null>(null);
+  const [totalTxLive, setTotalTxLive] = useState<number | null>(null);
+  const txTodayBaseRef = useRef<number | null>(null);
+  const totalTxBaseRef = useRef<number | null>(null);
+  const txDeltaRef = useRef<number>(0);
+  const lastSeenRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const res = await fetch('/api/v2/stats', { cache: 'no-store' });
+        if (res.status === 429) return;
+        const data = await res.json();
+        if (!cancelled) setStats(data);
+      } catch (e) {
+        // keep previous
+      }
+    };
+
+    const loadLatest = async () => {
+      try {
+        const res = await fetch('/rpc1/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+          cache: 'no-store',
+        });
+        const data = await res.json();
+        const hex = data?.result;
+        if (typeof hex === 'string' && hex.startsWith('0x')) {
+          const n = parseInt(hex, 16);
+          if (!cancelled) setLatestBlock(n);
+        }
+      } catch {}
+    };
+
+    const loadLiveTxCounters = async () => {
+      try {
+        const baseToday = stats?.transactions_today != null ? Number(stats.transactions_today) : null;
+        const baseTotal = stats?.total_transactions != null ? Number(stats.total_transactions) : null;
+        if (baseToday != null && (txTodayBaseRef.current == null || txTodayBaseRef.current !== baseToday)) {
+          txTodayBaseRef.current = baseToday;
+          txDeltaRef.current = 0;
+          lastSeenRef.current = null;
+        }
+        if (baseTotal != null && (totalTxBaseRef.current == null || totalTxBaseRef.current !== baseTotal)) {
+          totalTxBaseRef.current = baseTotal;
+          txDeltaRef.current = 0;
+          lastSeenRef.current = null;
+        }
+
+        const res = await fetch('/api/v2/blocks?type=block&limit=10', { cache: 'no-store' });
+        if (res.status === 429) return;
+        const data = await res.json();
+        const items = (data?.items || []).map((b: any) => ({ height: Number(b.height), tx: Number(b.transaction_count ?? 0) }));
+        if (!items.length) return;
+        const newest = Math.max(...items.map((x: any) => x.height));
+        const lastSeen = lastSeenRef.current;
+        if (lastSeen == null) {
+          lastSeenRef.current = newest;
+        } else {
+          const inc = items.filter((x: any) => x.height > lastSeen).reduce((a: number, x: any) => a + x.tx, 0);
+          if (inc > 0) {
+            txDeltaRef.current += inc;
+            lastSeenRef.current = newest;
+          }
+        }
+
+        if (!cancelled) {
+          if (txTodayBaseRef.current != null) setTxTodayLive(txTodayBaseRef.current + txDeltaRef.current);
+          if (totalTxBaseRef.current != null) setTotalTxLive(totalTxBaseRef.current + txDeltaRef.current);
+        }
+      } catch {}
+    };
+
+    load();
+    loadLatest();
+    loadLiveTxCounters();
+    const t = setInterval(load, 30000);
+    const t2 = setInterval(loadLatest, 4000);
+    const t3 = setInterval(loadLiveTxCounters, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+      clearInterval(t2);
+      clearInterval(t3);
+    };
+  }, [stats]);
+
+  const avgBlockSec = stats?.average_block_time ? (Number(stats.average_block_time) / 1000) : null;
+
+  const cards = [
+    {
+      label: 'LATEST BLOCK',
+      value: latestBlock != null ? `#${latestBlock}` : (stats?.total_blocks ? `#${stats.total_blocks}` : '--'),
+      sub: avgBlockSec != null ? `${avgBlockSec.toFixed(2)}s avg block time` : 'avg block time --',
+      icon: Layers,
+      color: 'cyan',
+      pulse: true,
+    },
+    {
+      label: 'TX TODAY',
+      value: txTodayLive != null ? txTodayLive : (stats?.transactions_today ?? '--'),
+      sub: stats?.network_utilization_percentage != null ? `${Number(stats.network_utilization_percentage).toFixed(1)}% utilization` : 'utilization --',
+      icon: ArrowRightLeft,
+      color: 'gold',
+    },
+    {
+      label: 'TOTAL TX',
+      value: totalTxLive != null ? totalTxLive : (stats?.total_transactions ?? '--'),
+      sub: stats?.total_addresses != null ? `${stats.total_addresses} addresses` : 'addresses --',
+      icon: Hash,
+      color: 'cyan',
+    },
+    {
+      label: 'GAS (AVG)',
+      value: stats?.gas_prices?.average != null ? `${stats.gas_prices.average}` : '--',
+      sub: stats?.gas_prices ? `slow ${stats.gas_prices.slow} · fast ${stats.gas_prices.fast}` : 'slow/fast --',
+      icon: Zap,
+      color: 'gold',
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-16 relative z-10">
+      {cards.map((c, i) => (
+        <motion.div
+          key={c.label}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 + i * 0.1 }}
+          className={`glow-box ${c.color === 'cyan' ? 'border-t-cyan-500/50 hover:border-cyan-500' : 'border-t-gold-500/50 hover:border-gold-500'} bg-dark-800/60 backdrop-blur-md p-6 rounded-xl border-t-2 flex flex-col items-center text-center group transition-colors`}
+        >
+          <div className={`mb-4 p-3 rounded-full ${c.color === 'cyan' ? 'bg-cyan-500/10 group-hover:bg-cyan-500/20' : 'bg-gold-500/10 group-hover:bg-gold-500/20'} transition-colors relative`}>
+            {c.pulse && (
+              <span className="absolute top-0 right-0 flex h-3 w-3">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${c.color === 'cyan' ? 'bg-cyan-400' : 'bg-gold-500'} opacity-75`}></span>
+                <span className={`relative inline-flex rounded-full h-3 w-3 ${c.color === 'cyan' ? 'bg-cyan-500' : 'bg-gold-500'}`}></span>
+              </span>
+            )}
+            <c.icon className={`w-6 h-6 ${c.color === 'cyan' ? 'text-cyan-400' : 'text-gold-500'}`} />
+          </div>
+
+          <div className="text-xs font-mono text-gold-500/50 mb-1">{c.label}</div>
+          <div className={`text-xl sm:text-2xl font-bold font-mono ${c.color === 'cyan' ? 'glow-text-cyan text-cyan-400' : 'glow-text text-gold-500'}`}>{c.value}</div>
+          <div className="mt-2 text-[10px] font-mono text-gold-500/40">{c.sub}</div>
+        </motion.div>
+      ))}
+    </div>
+  );
+};
+
+const DetailRow = ({ label, value, isCyan = false }: { label: string, value: string | number, isCyan?: boolean }) => (
+  <div className="flex flex-col gap-1 border-b border-gold-500/10 pb-4">
+    <span className="text-xs font-mono text-gold-500/50">{label}</span>
+    <div className={`text-sm font-mono break-all ${isCyan ? 'text-cyan-400 glow-text-cyan' : 'text-gold-400'}`}>
+      {value}
+    </div>
+  </div>
+);
+
+const BlockView = ({ block, onBack }: { block: any, onBack: () => void, key?: string }) => {
+  const [details, setDetails] = useState<any>(null);
+  const [blockTxs, setBlockTxs] = useState<any[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fmt = (weiLike: any, decimals = 18, dp = 6) => {
+      try {
+        const wei = BigInt(String(weiLike ?? '0'));
+        const neg = wei < 0n;
+        const x = neg ? -wei : wei;
+        const s = x.toString();
+        const head = s.length > decimals ? s.slice(0, -decimals) : '0';
+        const tail = s.length > decimals ? s.slice(-decimals) : s.padStart(decimals, '0');
+        return (neg ? '-' : '') + head + '.' + tail.slice(0, dp);
+      } catch {
+        return '--';
+      }
+    };
+
+    const short = (addr: string) => (addr ? (addr.slice(0, 6) + '…' + addr.slice(-4)) : '--');
+
+    const load = async () => {
+      try {
+        window.scrollTo(0, 0);
+
+        const res = await fetch(`/api/v2/blocks/${block.height}`, { cache: 'no-store' });
+        const b = await res.json();
+
+        // head block for confirmations
+        let head: number | null = null;
+        try {
+          const headRes = await fetch('/rpc1/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+          });
+          const headJson = await headRes.json();
+          const hx = headJson?.result;
+          if (typeof hx === 'string' && hx.startsWith('0x')) head = parseInt(hx, 16);
+        } catch {}
+
+        // clique signer
+        let signer = '';
+        try {
+          const hexNum = '0x' + Number(block.height).toString(16);
+          const snapRes = await fetch('/rpc1/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'clique_getSnapshot', params: [hexNum] }),
+          });
+          const snap = await snapRes.json();
+          signer = (snap?.result?.recents?.[String(block.height)] || '').toLowerCase();
+        } catch {}
+
+        const conf = head != null ? Math.max(0, head - Number(b.height)) : null;
+        const status = conf != null && conf <= 0 ? 'PENDING' : 'FINALIZED';
+
+        const details = {
+          height: b.height,
+          hash: b.hash,
+          status,
+          confirmations: conf != null ? conf : '--',
+          size: b.size != null ? String(b.size) : '--',
+          txCount: Number(b.transaction_count ?? 0),
+          time: b.timestamp ? new Date(b.timestamp).toLocaleString('en-GB', { hour12: false }) : '--',
+          miner: signer ? (short(signer) + '  ' + signer) : '--',
+          reward: fmt(b.transaction_fees ?? '0', 18, 6),
+          gasUsed: Number(b.gas_used ?? 0),
+          gasLimit: Number(b.gas_limit ?? 0),
+          parentHash: b.parent_hash ?? '--',
+          stateRoot: b.state_root ?? '--',
+        };
+
+        const txRes = await fetch(`/api/v2/blocks/${block.height}/transactions?limit=12`, { cache: 'no-store' });
+        const txData = await txRes.json();
+        const txs = (txData?.items || []).map((tx: any) => ({
+          hash: tx.hash,
+          from: tx.from?.hash || tx.from || '--',
+          to: tx.to?.hash || tx.to || '--',
+          value: fmt(tx.value ?? '0', 18, 6),
+          fee: fmt(tx.fee?.value ?? tx.fee ?? '0', 18, 6),
+          timestamp: tx.timestamp,
+          time: tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '--',
+        }));
+
+        if (!cancelled) {
+          setDetails(details);
+          setBlockTxs(txs);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [block]);
+
+  if (!details) return null;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      exit={{ opacity: 0, y: -20 }} 
+      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
+    >
+      <button 
+        onClick={onBack} 
+        className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 font-mono text-sm mb-8 group transition-colors cursor-pointer"
+      >
+        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> 
+        BACK TO STREAM
+      </button>
+
+      <div className="mb-8 flex items-center gap-4">
+        <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/30 shadow-[0_0_20px_rgba(0,240,255,0.2)]">
+          <Layers className="w-8 h-8 text-cyan-400" />
+        </div>
+        <div>
+          <h1 className="text-3xl md:text-4xl font-black tracking-widest">
+            BLOCK <span className="glow-text-cyan text-cyan-400">#{details.height}</span>
+          </h1>
+          <div className="flex items-center gap-3 mt-2">
+            <div className="flex items-center gap-1 text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
+              <CheckCircle2 className="w-3 h-3" /> {details.status}
+            </div>
+            <span className="text-xs font-mono text-gold-500/50">{details.confirmations} Block Confirmations</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="glow-box-cyan bg-dark-800/80 backdrop-blur-xl p-6 md:p-8 rounded-2xl border-t-4 border-t-cyan-500 mb-12">
+        <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 mb-6 text-cyan-400">
+          <Box className="w-5 h-5" />
+          OVERVIEW
+        </h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
+          <DetailRow label="BLOCK HASH" value={details.hash} isCyan />
+          <DetailRow label="TIMESTAMP" value={details.time} />
+          <DetailRow label="VALIDATOR" value={details.miner} isCyan />
+          <DetailRow label="BLOCK REWARD" value={`${details.reward} DCAI`} />
+          <DetailRow label="TRANSACTIONS" value={details.txCount} />
+          <DetailRow label="SIZE" value={details.size} />
+          <DetailRow label="GAS USED" value={`${details.gasUsed.toLocaleString()} (${((details.gasUsed / details.gasLimit) * 100).toFixed(2)}%)`} />
+          <DetailRow label="GAS LIMIT" value={details.gasLimit.toLocaleString()} />
+          <DetailRow label="PARENT HASH" value={details.parentHash} />
+          <DetailRow label="STATE ROOT" value={details.stateRoot} />
+        </div>
+      </div>
+
+      <div className="glow-box bg-dark-800/50 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2">
+            <ArrowRightLeft className="w-5 h-5 text-gold-500" />
+            TRANSACTIONS ({details.txCount})
+          </h2>
+        </div>
+
+        <div className="space-y-3">
+          {blockTxs.map((tx, idx) => (
+            <motion.div
+              key={tx.hash}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.05 }}
+              className="group flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg border border-gold-500/10 hover:border-cyan-500/40 bg-dark-900/50 transition-colors"
+            >
+              <div className="flex items-center gap-4 mb-2 sm:mb-0">
+                <div className="p-2 bg-gold-500/10 rounded-md group-hover:bg-cyan-500/20 transition-colors">
+                  <Hash className="w-4 h-4 text-gold-500 group-hover:text-cyan-400 transition-colors" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-mono text-cyan-400 break-all w-44 sm:w-72 leading-4">{tx.hash}</div>
+                  <div className="text-[10px] font-mono text-gold-500/50">{tx.time}{tx.timestamp ? (' · ' + timeAgo(tx.timestamp)) : ""}</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-1 px-3">
+                <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(tx.from)} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate w-24 cursor-pointer">{tx.from}</button>
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent relative">
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-cyan-400 rounded-full blur-[1px] shadow-[0_0_8px_#00F0FF]" />
+                </div>
+                <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(tx.to)} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate w-24 cursor-pointer">{tx.to}</button>
+              </div>
+
+              <div className="text-right mt-2 sm:mt-0">
+                <div className="text-sm font-mono font-bold text-gold-500 glow-text">{tx.value} DCAI</div>
+                <div className="text-[10px] font-mono text-gold-500/40">FEE: {tx.fee}</div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+        
+        <div className="mt-6 text-center">
+          <button className="text-xs font-mono text-cyan-400 hover:text-cyan-300 border border-cyan-500/30 hover:border-cyan-400 px-6 py-2 rounded transition-colors cursor-pointer">
+            LOAD MORE TRANSACTIONS
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+export default function App() {
+  const [currentView, setCurrentView] = useState<'home' | 'block'>('home');
+  const [selectedBlock, setSelectedBlock] = useState<any>(null);
+  
+  const [blocks, setBlocks] = useState<ReturnType<typeof generateBlock>[]>([]);
+  const [txs, setTxs] = useState<any[]>([]);
+  const [expandedTx, setExpandedTx] = useState<string | null>(null);
+  const blockHeightRef = useRef(29402934);
+
+
+  const timeAgo = (iso?: string) => {
+    try {
+      if (!iso) return '';
+      const ms = Date.now() - new Date(iso).getTime();
+      const m = Math.floor(ms / 60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return String(m) + 'm ago';
+      const h = Math.floor(m / 60);
+      if (h < 24) return String(h) + 'h ago';
+      const d = Math.floor(h / 24);
+      return String(d) + 'd ago';
+    } catch {
+      return '';
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const formatTDCAI = (weiLike: any, dp = 6) => {
+      try {
+        const wei = BigInt(String(weiLike ?? '0'));
+        const s = wei.toString();
+        const pad = s.length <= 18 ? '0'.repeat(18 - s.length + 1) + s : s;
+        const head = pad.slice(0, -18);
+        const tail = pad.slice(-18);
+        return `${head}.${tail.slice(0, dp)}`;
+      } catch {
+        return '--';
+      }
+    };
+
+    const fetchBlocks = async () => {
+      try {
+        const res = await fetch('/api/v2/blocks?type=block&limit=15', { cache: 'no-store' });
+        if (res.status === 429) return;
+        const data = await res.json();
+        const apiItems = (data?.items || []).slice(0, 15);
+
+        // Clique snapshot for real signer per block
+        let recents: Record<string, string> = {};
+        try {
+          const snapRes = await fetch('/rpc1/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'clique_getSnapshot', params: ['latest'] }),
+          });
+          const snap = await snapRes.json();
+          recents = snap?.result?.recents || {};
+        } catch {}
+
+        const short = (addr: string) => (addr ? (addr.slice(0, 6) + '…' + addr.slice(-4)) : '--');
+
+        const fmt = (weiLike: any, dp = 2) => {
+          try {
+            const wei = BigInt(String(weiLike ?? '0'));
+            const s = wei.toString();
+            const head = s.length > 18 ? s.slice(0, -18) : '0';
+            const tail = s.length > 18 ? s.slice(-18) : s.padStart(18, '0');
+            return head + '.' + tail.slice(0, dp);
+          } catch {
+            return '--';
+          }
+        };
+
+        const items = apiItems.map((b: any) => {
+          const height = Number(b.height);
+          const signer = (recents[String(height)] || '').toLowerCase();
+          const rewardWei = b.transaction_fees ?? '0';
+          return {
+            height,
+            hash: b.hash,
+            miner: signer ? short(signer) : '--',
+            validator: signer || '',
+            txCount: Number(b.transaction_count ?? 0),
+            timestamp: b.timestamp,
+            time: b.timestamp ? new Date(b.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '--',
+            reward: fmt(rewardWei, 2),
+            rewardWei: String(rewardWei ?? '0'),
+            gasUsed: b.gas_used,
+            gasLimit: b.gas_limit,
+            baseFeePerGas: b.base_fee_per_gas,
+          };
+        });
+
+        if (!cancelled) setBlocks(items);
+      } catch {}
+    };
+
+    const fetchTxs = async () => {
+      try {
+        const res = await fetch('/api/v2/transactions?limit=15', { cache: 'no-store' });
+        if (res.status === 429) return;
+        const data = await res.json();
+        const items = (data?.items || []).slice(0, 15).map((tx: any) => ({
+          hash: tx.hash,
+          result: tx.result || tx.status || '--',
+          method: tx.method || (tx.transaction_types?.[0] || 'txn'),
+          type: tx.type,
+          nonce: tx.nonce,
+          position: tx.position,
+          from: tx.from?.hash || tx.from || '--',
+          to: tx.to?.hash || tx.to || '--',
+          valueWei: String(tx.value ?? '0'),
+          value: formatTDCAI(tx.value),
+          feeWei: String(tx.fee?.value ?? tx.fee ?? '0'),
+          fee: formatTDCAI(tx.fee?.value ?? tx.fee ?? '0'),
+          gasLimit: String(tx.gas_limit ?? '--'),
+          gasUsed: String(tx.gas_used ?? '--'),
+          baseFeePerGas: String(tx.base_fee_per_gas ?? '--'),
+          gasPrice: String(tx.gas_price ?? '--'),
+          timestamp: tx.timestamp,
+          time: tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '--',
+        }));
+        if (!cancelled) setTxs(items);
+      } catch {}
+    };
+
+    fetchBlocks();
+    fetchTxs();
+
+    const bInt = setInterval(fetchBlocks, 8000);
+    const tInt = setInterval(fetchTxs, 4000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(bInt);
+      clearInterval(tInt);
+    };
+  }, []);
+
+  const handleViewBlock = (block: any) => {
+    setSelectedBlock(block);
+    setCurrentView('block');
+  };
+
+  return (
+    <div className="min-h-screen bg-dark-900 text-gold-500 font-sans selection:bg-cyan-500 selection:text-dark-900 relative overflow-x-hidden">
+      <div className="hex-bg" />
+      <CursorFollower />
+      <div className="scanline" />
+      <div className="perspective-grid" />
+      
+      <Header onHome={() => setCurrentView('home')} />
+      
+      <AnimatePresence mode="wait">
+        {currentView === 'home' ? (
+          <motion.main 
+            key="home"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20"
+          >
+            <Hero />
+            <Stats />
+            
+            <div className="mb-12 relative z-10">
+              <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-6 px-4">
+                <Box className="w-5 h-5 text-cyan-400" />
+                LATEST BLOCKS
+              </h2>
+              
+              <div className="flex overflow-x-auto gap-8 pb-12 pt-4 px-4 snap-x hide-scrollbar relative items-center">
+                {/* Animated Chain Background */}
+                <div className="absolute top-1/2 left-0 w-full h-1 bg-dark-800 -translate-y-1/2 z-0 overflow-hidden rounded-full">
+                  <motion.div 
+                    className="h-full w-1/3 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"
+                    animate={{ x: ['-100%', '300%'] }}
+                    transition={{ duration: 2.5, repeat: Infinity, ease: "linear" }}
+                  />
+                </div>
+                
+                <AnimatePresence mode="popLayout">
+                  {blocks.map((block, i) => (
+                    <motion.div
+                      key={block.height}
+                      layout
+                      initial={{ opacity: 0, x: -100, scale: 0.8 }}
+                      animate={{ opacity: 1, x: 0, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.5 }}
+                      transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                      className="shrink-0 w-80 snap-center relative z-10"
+                    >
+                      {/* Left Node Connector */}
+                      <div className="absolute top-1/2 -left-4 w-4 h-4 bg-dark-900 border-2 border-cyan-500 rounded-full -translate-y-1/2 z-20 shadow-[0_0_10px_#00F0FF]">
+                        <div className="absolute inset-1 bg-cyan-400 rounded-full animate-pulse" />
+                      </div>
+                      {/* Right Node Connector */}
+                      <div className="absolute top-1/2 -right-4 w-4 h-4 bg-dark-900 border-2 border-cyan-500 rounded-full -translate-y-1/2 z-20 shadow-[0_0_10px_#00F0FF]">
+                         <div className="absolute inset-1 bg-cyan-400 rounded-full animate-pulse" />
+                      </div>
+
+                      <div className="relative glow-box bg-dark-800/90 backdrop-blur-xl p-6 rounded-2xl border-t-4 border-t-cyan-500 overflow-hidden group hover:border-cyan-400 transition-colors">
+                        <div className="absolute -right-10 -top-10 text-cyan-500/5 group-hover:text-cyan-500/10 transition-colors duration-500">
+                          <Box className="w-40 h-40" />
+                        </div>
+                        
+                        <div className="relative z-10">
+                          <div className="flex justify-between items-start mb-4">
+                            <div>
+                              <div className="text-xs text-cyan-500/60 font-mono mb-1">BLOCK HEIGHT</div>
+                              <div className="text-2xl font-bold font-mono text-cyan-400 glow-text-cyan">#{block.height}</div>
+                            </div>
+                            <div className="flex items-center gap-1 text-xs text-cyan-400/80 font-mono bg-cyan-500/10 px-2 py-1 rounded border border-cyan-500/20">
+                              <Clock className="w-3 h-3" /> {block.time}
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-[10px] text-gold-500/40 font-mono mb-1">BLOCK HASH</div>
+                              <div className="text-sm font-mono text-gold-500/80 truncate">{block.hash}</div>
+                            </div>
+                            
+                            <div className="flex justify-between items-end">
+                              <div>
+                                <div className="text-[10px] text-gold-500/40 font-mono mb-1">VALIDATOR (SIGNER)</div>
+                                <div className="text-xs font-mono text-gold-400">{block.miner}</div>
+                                <div className="text-[10px] font-mono text-gold-500/40 truncate max-w-[170px]">{block.validator ?? ""}</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-[10px] text-gold-500/40 font-mono mb-1">REWARD / FEES</div>
+                                <div className="text-sm font-mono font-bold text-cyan-400">{block.reward} tDCAI</div>
+                                <div className="text-[10px] font-mono text-gold-500/40">{block.rewardWei} wei · baseFee {block.baseFeePerGas ?? "--"} wei</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 pt-4 border-t border-cyan-500/20 flex justify-between items-center">
+                            <div className="text-xs font-mono text-gold-500/60">{block.txCount} Transactions</div>
+                            <div className="text-[10px] font-mono text-gold-500/40">gas {block.gasUsed ?? "--"} / {block.gasLimit ?? "--"}</div>
+                            <button 
+                              onClick={() => handleViewBlock(block)}
+                              className="text-xs font-mono text-cyan-400 hover:text-cyan-300 flex items-center gap-1 group-hover:translate-x-1 transition-transform cursor-pointer"
+                            >
+                              VIEW <ChevronRight className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            </div>
+
+            <div className="relative z-10">
+              <div className="glow-box bg-dark-800/50 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-bold tracking-widest flex items-center gap-2">
+                    <ArrowRightLeft className="w-5 h-5 text-gold-500" />
+                    LIVE TRANSACTIONS
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                    </span>
+                    <span className="text-xs font-mono text-cyan-400/80">STREAMING</span>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <AnimatePresence initial={false}>
+                    {txs.map(tx => (
+                      <motion.div
+                        key={tx.hash}
+                        layout
+                        initial={{ opacity: 0, y: -20, backgroundColor: 'rgba(0, 240, 255, 0.1)' }}
+                        animate={{ opacity: 1, y: 0, backgroundColor: 'rgba(0, 240, 255, 0)' }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        transition={{ duration: 0.5 }}
+                        className="group flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg border border-gold-500/10 hover:border-cyan-500/40 bg-dark-900/50 transition-colors relative"
+                      >
+                        <div className="flex items-center gap-4 mb-2 sm:mb-0">
+                          <div className="p-2 bg-gold-500/10 rounded-md group-hover:bg-cyan-500/20 transition-colors">
+                            <button onClick={() => setExpandedTx(expandedTx === tx.hash ? null : tx.hash)} className="cursor-pointer">
+                              <Info className="w-4 h-4 text-gold-500 group-hover:text-cyan-400 transition-colors" />
+                            </button>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className={"text-[10px] font-mono px-2 py-0.5 rounded border " + ((tx.result === "success" || tx.result === "ok") ? "text-emerald-300 border-emerald-500/30 bg-emerald-500/10" : "text-rose-300 border-rose-500/30 bg-rose-500/10")}>
+                                {(tx.result === "success" || tx.result === "ok") ? "SUCCESS" : "FAILED"}
+                              </span>
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-cyan-500/20 bg-cyan-500/10 text-cyan-300">
+                                {String(tx.method ?? "txn").toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-mono text-cyan-400 break-all w-44 sm:w-72 leading-4">{tx.hash}</div>
+                            <div className="text-[10px] font-mono text-gold-500/50">{tx.time}{tx.timestamp ? (' · ' + timeAgo(tx.timestamp)) : ""}</div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-1 px-3">
+                          <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(tx.from)} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate w-24 cursor-pointer">{tx.from}</button>
+                          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent relative">
+                            <div className="absolute top-1/2 -translate-y-1/2 w-2 h-2 bg-cyan-400 rounded-full blur-[1px] shadow-[0_0_8px_#00F0FF] tx-flow-dot" />
+                          </div>
+                          <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(tx.to)} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate w-24 cursor-pointer">{tx.to}</button>
+                        </div>
+
+                        <div className="text-right mt-2 sm:mt-0">
+                          <div className="text-sm font-mono font-bold text-gold-500 glow-text">Value {tx.value} tDCAI</div>
+                          <div className="text-[10px] font-mono text-gold-500/40">Fee {tx.fee} tDCAI</div>
+                        </div>
+
+                        {expandedTx === tx.hash && (
+                          <div className="absolute left-0 top-full mt-2 z-50 w-full sm:w-[720px] rounded-lg border border-cyan-500/30 bg-dark-900/95 backdrop-blur-md p-3 text-[11px] font-mono text-gold-500/80 shadow-[0_0_30px_rgba(0,240,255,0.18)] max-h-60 overflow-auto">
+                            <div className="text-cyan-300/80 mb-2">Additional info</div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>Transaction fee: <span className="text-cyan-300">{tx.fee} tDCAI</span> ({tx.feeWei} wei)</div>
+                              <div>Gas limit | used: <span className="text-cyan-300">{tx.gasLimit}</span> | <span className="text-cyan-300">{tx.gasUsed}</span></div>
+                              <div>Base fee (wei): <span className="text-cyan-300">{tx.baseFeePerGas}</span></div>
+                              <div>Txn type: <span className="text-cyan-300">{String(tx.type ?? '--')}</span> · Nonce: <span className="text-cyan-300">{String(tx.nonce ?? '--')}</span> · Position: <span className="text-cyan-300">{String(tx.position ?? '--')}</span></div>
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </div>
+          </motion.main>
+        ) : (
+          <BlockView 
+            key="block" 
+            block={selectedBlock} 
+            onBack={() => setCurrentView('home')} 
+          />
+        )}
+      </AnimatePresence>
+
+      <footer className="border-t border-cyan-500/20 py-8 mt-20 relative z-10 bg-dark-900/80 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Cpu className="w-5 h-5 text-cyan-400" />
+            <span className="font-black tracking-widest text-gold-500/50">DCAI<span className="text-cyan-500/50">L3</span></span>
+          </div>
+          <div className="text-xs font-mono text-gold-500/40">
+            © 2026 DCAI FOUNDATION. ALL SYSTEMS NOMINAL.
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
