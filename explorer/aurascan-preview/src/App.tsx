@@ -518,6 +518,12 @@ export default function App() {
   const [expandedTx, setExpandedTx] = useState<string | null>(null);
   const blockHeightRef = useRef(29402934);
 
+  // INCOMING block countdown + new-block animation helpers
+  const [avgBlockMs, setAvgBlockMs] = useState<number>(2000);
+  const [incomingMs, setIncomingMs] = useState<number>(2000);
+  const latestHeightRef = useRef<number | null>(null);
+  const lastNewBlockAtRef = useRef<number>(Date.now());
+
 
   const timeAgo = (iso?: string) => {
     try {
@@ -534,6 +540,16 @@ export default function App() {
       return '';
     }
   };
+
+  // Update the incoming-block countdown in real time
+  useEffect(() => {
+    const id = setInterval(() => {
+      const elapsed = Date.now() - lastNewBlockAtRef.current;
+      const ms = Math.max(0, avgBlockMs - (elapsed % avgBlockMs));
+      setIncomingMs(ms);
+    }, 100);
+    return () => clearInterval(id);
+  }, [avgBlockMs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -604,7 +620,31 @@ export default function App() {
           };
         });
 
-        if (!cancelled) setBlocks(items);
+        if (!cancelled) {
+          // Estimate avg block time from the newest two blocks when possible
+          try {
+            if (items.length >= 2 && items[0]?.timestamp && items[1]?.timestamp) {
+              const t0 = new Date(items[0].timestamp).getTime();
+              const t1 = new Date(items[1].timestamp).getTime();
+              const dt = Math.abs(t0 - t1);
+              if (Number.isFinite(dt) && dt > 500 && dt < 20000) setAvgBlockMs(dt);
+            }
+          } catch {}
+
+          // If a new block arrived, reset the incoming countdown
+          const newest = items[0];
+          if (newest && typeof newest.height === 'number') {
+            if (latestHeightRef.current == null) {
+              latestHeightRef.current = newest.height;
+              lastNewBlockAtRef.current = Date.now();
+            } else if (newest.height > latestHeightRef.current) {
+              latestHeightRef.current = newest.height;
+              lastNewBlockAtRef.current = Date.now();
+            }
+          }
+
+          setBlocks(items);
+        }
       } catch {}
     };
 
@@ -637,16 +677,45 @@ export default function App() {
       } catch {}
     };
 
+    // Faster new-block detection: poll eth_blockNumber and refresh blocks immediately on change
+    let lastBn: number | null = null;
+    const pollBlockNumber = async () => {
+      try {
+        const r = await fetch('/rpc1/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+          cache: 'no-store',
+        });
+        const j = await r.json();
+        const hex = j?.result;
+        if (typeof hex === 'string' && hex.startsWith('0x')) {
+          const bn = parseInt(hex, 16);
+          if (Number.isFinite(bn)) {
+            if (lastBn == null) lastBn = bn;
+            if (bn > (lastBn ?? 0)) {
+              lastBn = bn;
+              fetchBlocks();
+            }
+          }
+        }
+      } catch {}
+    };
+
+    pollBlockNumber();
+    const bnInt = setInterval(pollBlockNumber, 1000);
+
     fetchBlocks();
     fetchTxs();
 
-    const bInt = setInterval(fetchBlocks, 8000);
-    const tInt = setInterval(fetchTxs, 4000);
+    const bInt = setInterval(fetchBlocks, 2000);
+    const tInt = setInterval(fetchTxs, 3000);
 
     return () => {
       cancelled = true;
       clearInterval(bInt);
       clearInterval(tInt);
+      clearInterval(bnInt);
     };
   }, []);
 
@@ -693,14 +762,44 @@ export default function App() {
                 </div>
                 
                 <AnimatePresence mode="popLayout">
+                  {/* Incoming block placeholder (left-most) */}
+                  <motion.div
+                    key="incoming"
+                    layout
+                    initial={{ opacity: 0, x: -20, scale: 0.95 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ type: 'spring', stiffness: 140, damping: 24, mass: 0.9 }}
+                    className="shrink-0 w-44 sm:w-52 snap-center relative z-10"
+                  >
+                    <div className="relative glow-box bg-dark-800/50 backdrop-blur-xl p-3 rounded-xl border border-gold-500/25 overflow-hidden">
+                      <motion.div
+                        className="absolute inset-0"
+                        animate={{ opacity: [0.06, 0.14, 0.06] }}
+                        transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+                        style={{ background: 'radial-gradient(circle at 30% 30%, rgba(255,215,0,0.14), transparent 60%)' }}
+                      />
+                      <div className="relative z-10">
+                        <div className="text-[10px] text-gold-500/70 font-mono tracking-widest">INCOMING</div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <motion.div
+                            className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(0,240,255,0.8)]"
+                            animate={{ opacity: [0.2, 1, 0.2], scale: [0.9, 1.05, 0.9] }}
+                            transition={{ duration: 0.9, repeat: Infinity, ease: 'easeInOut' }}
+                          />
+                          <div className="text-xs font-mono text-gold-500/60">scanning…</div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
                   {blocks.map((block, i) => (
                     <motion.div
                       key={block.height}
                       layout
-                      initial={{ opacity: 0, x: -100, scale: 0.8 }}
+                      initial={{ opacity: 0, x: -40, scale: 0.95 }}
                       animate={{ opacity: 1, x: 0, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.5 }}
-                      transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                      transition={{ type: "spring", stiffness: 120, damping: 26, mass: 0.9 }}
                       className="shrink-0 w-80 snap-center relative z-10"
                     >
                       {/* Left Node Connector */}
