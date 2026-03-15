@@ -2,6 +2,15 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info } from 'lucide-react';
 
+function navigateTo(path: string) {
+  try {
+    window.history.pushState({}, '', path);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  } catch {
+    window.location.href = path;
+  }
+}
+
 async function copyToClipboard(text: string) {
   try {
     if (navigator.clipboard && (window as any).isSecureContext) {
@@ -315,9 +324,9 @@ const DetailRow = ({ label, value, isCyan = false, onCopy }: { label: string, va
       {onCopy ? (
         <button
           onClick={onCopy}
-          className="shrink-0 text-[10px] font-mono text-cyan-300 hover:text-cyan-200 border border-cyan-500/25 hover:border-cyan-400 px-2 py-1 rounded transition-colors"
+          className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors"
         >
-          COPY
+          ⧉
         </button>
       ) : null}
     </div>
@@ -482,15 +491,26 @@ const BlockView = ({ block, onBack }: { block: any, onBack: () => void, key?: st
         </h2>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
-          <DetailRow label="BLOCK HASH" value={details.hash} isCyan />
+          <DetailRow label="BLOCK HASH" value={details.hash} isCyan onCopy={() => copyToClipboard(String(details.hash))} />
           <DetailRow label="TIMESTAMP" value={details.time} />
-          <DetailRow label="VALIDATOR" value={details.miner} isCyan />
+          <div className="flex flex-col gap-1 border-b border-gold-500/10 pb-4">
+            <span className="text-xs font-mono text-gold-500/50">VALIDATOR</span>
+            <div className="flex items-start justify-between gap-3">
+              <button
+                onClick={() => details.validator && navigateTo(`/address/${details.validator}`)}
+                className="text-left text-sm font-mono break-all text-cyan-400 glow-text-cyan hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+              >
+                {details.validator || details.miner}
+              </button>
+              <button onClick={() => details.validator && copyToClipboard(String(details.validator))} className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded">⧉</button>
+            </div>
+          </div>
           <DetailRow label="BLOCK REWARD" value={`${details.reward} DCAI`} />
           <DetailRow label="TRANSACTIONS" value={details.txCount} />
           <DetailRow label="SIZE" value={details.size} />
           <DetailRow label="GAS USED" value={`${details.gasUsed.toLocaleString()} (${((details.gasUsed / details.gasLimit) * 100).toFixed(2)}%)`} />
           <DetailRow label="GAS LIMIT" value={details.gasLimit.toLocaleString()} />
-          <DetailRow label="PARENT HASH" value={details.parentHash} />
+          <DetailRow label="PARENT HASH" value={details.parentHash} onCopy={() => copyToClipboard(String(details.parentHash))} />
           <DetailRow label="STATE ROOT" value={details.stateRoot} />
         </div>
       </div>
@@ -523,23 +543,29 @@ const BlockView = ({ block, onBack }: { block: any, onBack: () => void, key?: st
               </div>
 
               <div className="flex items-center gap-2 flex-1 px-3">
-                <button onClick={async () => {
-  const ok = await copyToClipboard(tx.from);
-  if (ok) {
-    setCopyToast('Copied FROM: ' + tx.from);
-    setTimeout(() => setCopyToast(null), 1200);
-  }
-}} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate w-24 cursor-pointer">{tx.from}</button>
+                <div className="flex items-center gap-2 w-28">
+  <button onClick={() => navigateTo(`/address/${tx.from}`)} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate cursor-pointer underline decoration-gold-500/20 hover:decoration-cyan-400/60">{tx.from}</button>
+  <button onClick={async () => {
+    const ok = await copyToClipboard(tx.from);
+    if (ok) {
+      setCopyToast('Copied FROM: ' + tx.from);
+      setTimeout(() => setCopyToast(null), 1200);
+    }
+  }} className="w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
+</div>
                 <div className="h-px flex-1 bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent relative">
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-cyan-400 rounded-full blur-[1px] shadow-[0_0_8px_#00F0FF]" />
                 </div>
-                <button onClick={async () => {
-  const ok = await copyToClipboard(tx.to);
-  if (ok) {
-    setCopyToast('Copied TO: ' + tx.to);
-    setTimeout(() => setCopyToast(null), 1200);
-  }
-}} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate w-24 cursor-pointer">{tx.to}</button>
+                <div className="flex items-center gap-2 w-28 justify-end">
+  <button onClick={() => navigateTo(`/address/${tx.to}`)} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate cursor-pointer underline decoration-gold-500/20 hover:decoration-cyan-400/60">{tx.to}</button>
+  <button onClick={async () => {
+    const ok = await copyToClipboard(tx.to);
+    if (ok) {
+      setCopyToast('Copied TO: ' + tx.to);
+      setTimeout(() => setCopyToast(null), 1200);
+    }
+  }} className="w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
+</div>
               </div>
 
               <div className="text-right mt-2 sm:mt-0">
@@ -828,17 +854,50 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
 
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="rounded-lg border border-gold-500/15 bg-dark-900/40 p-4">
-                  <div className="text-[10px] font-mono text-gold-500/40 mb-2">DECODED (SKELETON)</div>
-                  <div className="space-y-2">
-                    {[0,1,2].map((i) => (
-                      <motion.div
-                        key={i}
-                        className="h-3 rounded bg-gold-500/10"
-                        animate={{ opacity: [0.35, 0.8, 0.35] }}
-                        transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut', delay: i * 0.1 }}
-                      />
-                    ))}
-                  </div>
+                  <div className="text-[10px] font-mono text-gold-500/40 mb-2">DECODED</div>
+                  {tx?.decoded_input?.parameters?.length ? (
+                    <div>
+                      <div className="text-xs font-mono text-cyan-300 mb-3">{tx?.decoded_input?.method_call || 'decoded'} </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-[11px] font-mono">
+                          <thead>
+                            <tr className="text-gold-500/50">
+                              <th className="text-left py-1 pr-4">NAME</th>
+                              <th className="text-left py-1 pr-4">TYPE</th>
+                              <th className="text-left py-1">VALUE</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tx.decoded_input.parameters.map((p: any, i: number) => (
+                              <motion.tr
+                                key={i}
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: i * 0.03 }}
+                                className="border-t border-gold-500/10"
+                              >
+                                <td className="py-2 pr-4 text-gold-500/70">{p.name || `arg${i}`}</td>
+                                <td className="py-2 pr-4 text-gold-500/50">{p.type || '--'}</td>
+                                <td className="py-2 text-cyan-200/90 break-all">{String(p.value ?? p.hex ?? p)}</td>
+                              </motion.tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {[0,1,2].map((i) => (
+                        <motion.div
+                          key={i}
+                          className="h-3 rounded bg-gold-500/10"
+                          animate={{ opacity: [0.35, 0.8, 0.35] }}
+                          transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut', delay: i * 0.1 }}
+                        />
+                      ))}
+                      <div className="text-[10px] font-mono text-gold-500/40">decoded pending / unavailable</div>
+                    </div>
+                  )}
                 </div>
                 <div className="rounded-lg border border-gold-500/15 bg-dark-900/40 p-4">
                   <div className="text-[10px] font-mono text-gold-500/40 mb-2">INTERACTIONS</div>
@@ -912,9 +971,16 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
                 >
                   <div className="min-w-0">
                     <div className="text-[10px] font-mono text-gold-500/40">LOG #{logsLoading ? '--' : (lg?.index ?? i)}</div>
-                    <div className="mt-1 text-xs font-mono text-cyan-300 break-all">
+                    <button
+                      onClick={() => {
+                        if (logsLoading) return;
+                        const a = (lg?.address?.hash || lg?.address || '');
+                        if (a) onViewAddress(String(a));
+                      }}
+                      className="mt-1 text-left text-xs font-mono text-cyan-300 hover:text-cyan-200 break-all underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                    >
                       {logsLoading ? 'loading…' : (lg?.address?.hash || lg?.address || '--')}
-                    </div>
+                    </button>
                     <div className="mt-1 text-[10px] font-mono text-gold-500/50">
                       {eventName((lg?.topics || [])[0])} · topics {(lg?.topics || []).filter(Boolean).length} · block {lg?.block_number ?? '--'}
                     </div>
@@ -1038,10 +1104,12 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
 };
 
 
-const AddressView = ({ address, onBack }: { address: string, onBack: () => void }) => {
+const AddressView = ({ address, onBack, onViewTx }: { address: string, onBack: () => void, onViewTx: (h: string) => void }) => {
   const [info, setInfo] = useState<any>(null);
   const [tab, setTab] = useState<'overview' | 'txs' | 'tokens'>('overview');
   const [copyToast, setCopyToast] = useState<string | null>(null);
+  const [addrTxs, setAddrTxs] = useState<any[] | null>(null);
+  const [addrTxsLoading, setAddrTxsLoading] = useState<boolean>(false);
 
   const fmtTDCAI = (weiLike: any, dp = 6) => {
     try {
@@ -1069,6 +1137,23 @@ const AddressView = ({ address, onBack }: { address: string, onBack: () => void 
     load();
     return () => { cancelled = true; };
   }, [address]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAddrTxs = async () => {
+      try {
+        setAddrTxsLoading(true);
+        const res = await fetch(`/api/v2/addresses/${address}/transactions?limit=25`, { cache: 'no-store' });
+        if (res.status === 429) return;
+        const j = await res.json();
+        if (!cancelled) setAddrTxs(j?.items || []);
+      } catch {}
+      finally { if (!cancelled) setAddrTxsLoading(false); }
+    };
+    if (tab === 'txs' && addrTxs == null && !addrTxsLoading) loadAddrTxs();
+    return () => { cancelled = true; };
+  }, [tab, address]);
+
 
   const copy = async (label: string, value: string) => {
     const ok = await copyToClipboard(value);
@@ -1162,7 +1247,45 @@ const AddressView = ({ address, onBack }: { address: string, onBack: () => void 
           <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
             <ArrowRightLeft className="w-5 h-5 text-cyan-400" /> TRANSACTIONS
           </h2>
-          <div className="text-xs font-mono text-gold-500/60">Skeleton ready. Next: fetch /api/v2/addresses/:hash/transactions</div>
+          <div className="text-xs font-mono text-gold-500/60">{addrTxsLoading ? 'Loading…' : (addrTxs && addrTxs.length ? `${addrTxs.length} tx(s)` : 'No transactions')}</div>
+          <div className="mt-4 space-y-3">
+            {(addrTxsLoading ? [0,1,2] : (addrTxs || [])).map((tx: any, i: any) => (
+              <motion.div
+                key={addrTxsLoading ? `sk-${i}` : tx.hash}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.18 }}
+                className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4"
+              >
+                {addrTxsLoading ? (
+                  <div className="h-3 w-full rounded bg-gold-500/10" />
+                ) : (
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <button
+                        onClick={() => onViewTx(tx.hash)}
+                        className="text-left text-[11px] font-mono text-cyan-300 hover:text-cyan-200 break-all underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                      >
+                        {tx.hash}
+                      </button>
+                      <div className="mt-1 text-[10px] font-mono text-gold-500/50">
+                        status {tx.status ?? tx.result ?? '--'} · block {tx.block ?? '--'} · pos {tx.position ?? '--'}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-xs font-mono text-gold-500/90">
+                        {fmtTDCAI(tx.value)} <span className="text-gold-500/60">tDCAI</span>
+                      </div>
+                      <div className="text-[10px] font-mono text-gold-500/35">{String(tx.value ?? '0')} wei</div>
+                      <div className="mt-2 text-[10px] font-mono text-gold-500/60">fee {fmtTDCAI(tx.fee?.value ?? tx.fee ?? '0')} tDCAI</div>
+                      <div className="text-[10px] font-mono text-gold-500/35">{String(tx.fee?.value ?? tx.fee ?? '0')} wei</div>
+                      <div className="text-[10px] font-mono text-gold-500/50">conf {tx.confirmations ?? '--'}</div>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            ))}
+          </div>
         </div>
       ) : (
         <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
@@ -1577,8 +1700,18 @@ export default function App() {
                             <div className="flex justify-between items-end">
                               <div>
                                 <div className="text-[10px] text-gold-500/40 font-mono mb-1">VALIDATOR (SIGNER)</div>
-                                <div className="text-xs font-mono text-gold-400">{block.miner}</div>
-                                <div className="text-[10px] font-mono text-gold-500/40 truncate max-w-[170px]">{block.validator ?? ""}</div>
+                                <button
+                                  onClick={() => block.validator && navigateTo(`/address/${block.validator}`)}
+                                  className="text-left text-xs font-mono text-gold-400 hover:text-cyan-300 underline decoration-gold-500/20 hover:decoration-cyan-400/60"
+                                >
+                                  {block.miner}
+                                </button>
+                                <button
+                                  onClick={() => block.validator && navigateTo(`/address/${block.validator}`)}
+                                  className="text-left text-[10px] font-mono text-gold-500/40 hover:text-cyan-300 truncate max-w-[170px] underline decoration-gold-500/10 hover:decoration-cyan-400/60"
+                                >
+                                  {block.validator ?? ""}
+                                </button>
                               </div>
                               <div className="text-right">
                                 <div className="text-[10px] text-gold-500/40 font-mono mb-1">REWARD / FEES</div>
@@ -1714,6 +1847,7 @@ export default function App() {
             key="address"
             address={selectedAddress || ''}
             onBack={() => setCurrentView('home')}
+            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
           />
         ) : (
           <BlockView 
