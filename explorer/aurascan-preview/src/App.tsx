@@ -221,6 +221,7 @@ const Hero = () => (
 const Stats = () => {
   const [stats, setStats] = useState<any>(null);
   const [latestBlock, setLatestBlock] = useState<number | null>(null);
+  const [headBlock, setHeadBlock] = useState<number | null>(null);
   const [txTodayLive, setTxTodayLive] = useState<number | null>(null);
   const [totalTxLive, setTotalTxLive] = useState<number | null>(null);
   const txTodayBaseRef = useRef<number | null>(null);
@@ -249,6 +250,24 @@ const Stats = () => {
         const data = await res.json();
         const h = Number(data?.items?.[0]?.height);
         if (Number.isFinite(h) && !cancelled) setLatestBlock(h);
+      } catch {}
+    };
+
+    const loadHead = async () => {
+      try {
+        // RPC head block (real-time). This is usually ahead of Blockscout "indexed" height.
+        const res = await fetch('/rpc1/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+          cache: 'no-store',
+        });
+        const j = await res.json();
+        const hx = j?.result;
+        if (typeof hx === 'string' && hx.startsWith('0x')) {
+          const bn = parseInt(hx, 16);
+          if (Number.isFinite(bn) && !cancelled) setHeadBlock(bn);
+        }
       } catch {}
     };
 
@@ -293,25 +312,33 @@ const Stats = () => {
 
     load();
     loadLatest();
+    loadHead();
     loadLiveTxCounters();
     const t = setInterval(load, 30000);
     const t2 = setInterval(loadLatest, 2000);
+    const tHead = setInterval(loadHead, 1000);
     const t3 = setInterval(loadLiveTxCounters, 4000);
     return () => {
       cancelled = true;
       clearInterval(t);
       clearInterval(t2);
+      clearInterval(tHead);
       clearInterval(t3);
     };
   }, [stats]);
 
   const avgBlockSec = stats?.average_block_time ? (Number(stats.average_block_time) / 1000) : null;
+  const indexedLag = headBlock != null && latestBlock != null ? Math.max(0, headBlock - latestBlock) : null;
 
   const cards = [
     {
-      label: 'LATEST BLOCK (INDEXED)',
-      value: latestBlock != null ? `#${latestBlock}` : (stats?.total_blocks ? `#${stats.total_blocks}` : '--'),
-      sub: avgBlockSec != null ? `${avgBlockSec.toFixed(2)}s avg block time` : 'avg block time --',
+      label: 'LATEST BLOCK (HEAD)',
+      value: headBlock != null ? `#${headBlock}` : (latestBlock != null ? `#${latestBlock}` : (stats?.total_blocks ? `#${stats.total_blocks}` : '--')),
+      sub:
+        (avgBlockSec != null ? `${avgBlockSec.toFixed(2)}s avg` : 'avg --') +
+        ' · indexed ' +
+        (latestBlock != null ? `#${latestBlock}` : '--') +
+        (indexedLag != null ? ` · lag ${indexedLag}` : ''),
       icon: Layers,
       color: 'cyan',
       pulse: true,
