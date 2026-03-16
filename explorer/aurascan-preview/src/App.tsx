@@ -3357,6 +3357,11 @@ const DashboardView = () => {
                       {' '}· 429 <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['429'] ?? 0}</span>
                     </div>
                     <div className="mt-1 text-gold-500/50">
+                      latency (60m)
+                      {' '}p50 <span className="text-cyan-200/90">{k?.usage?.latencyLast60m?.p50Ms ?? '--'}</span>ms
+                      {' '}· p95 <span className="text-cyan-200/90">{k?.usage?.latencyLast60m?.p95Ms ?? '--'}</span>ms
+                    </div>
+                    <div className="mt-1 text-gold-500/50">
                       top methods (60m)
                       {Array.isArray(k?.usage?.topMethodsLast60m) && k.usage.topMethodsLast60m.length ? (
                         <span className="text-cyan-200/90">{' '}{k.usage.topMethodsLast60m.slice(0, 6).map((m: any) => `${m.method}:${m.count}`).join(' · ')}</span>
