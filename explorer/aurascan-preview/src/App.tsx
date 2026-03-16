@@ -84,24 +84,6 @@ const CursorFollower = () => {
   );
 };
 
-const NavItem = ({
-  label,
-  isActive,
-  onClick,
-}: {
-  label: string;
-  isActive?: boolean;
-  onClick?: () => void;
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`text-sm font-mono transition-all ${isActive ? 'text-cyan-300 glow-text-cyan' : 'text-gold-500/70 hover:text-cyan-400 hover:glow-text-cyan'}`}
-  >
-    {label}
-  </button>
-);
-
 const Header = ({
   active,
   onHome,
@@ -114,6 +96,15 @@ const Header = ({
   onTxs: () => void,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const NavItem = ({ label, isActive, onClick }: { label: string, isActive?: boolean, onClick?: () => void }) => (
+    <button
+      onClick={onClick}
+      className={`text-sm font-mono transition-all ${isActive ? 'text-cyan-300 glow-text-cyan' : 'text-gold-500/70 hover:text-cyan-400 hover:glow-text-cyan'}`}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <header className="sticky top-0 z-[100] bg-dark-900/80 backdrop-blur-md border-b border-gold-500/20 pointer-events-auto">

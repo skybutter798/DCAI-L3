@@ -1,37 +1,20 @@
-# Aurascan Preview (DCAI Explorer UI Prototype)
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+</div>
 
-This folder contains the Vite/React UI prototype currently served on the Infra host.
+# Run and deploy your AI Studio app
 
-## Live Preview
+This contains everything you need to run your app locally.
 
-- Preview URL: `http://139.180.140.143:3002/`
+View your app in AI Studio: https://ai.studio/apps/fda46782-d82e-4db8-ab1c-2282c23ca6b0
 
-## On-Server Paths (Infra host)
+## Run Locally
 
-- Source directory: `/opt/aurascan-explorer`
-- Nginx config (bind-mounted into preview container): `/opt/aurascan-explorer/nginx.conf`
-- Container: `aurascan_preview` (nginx)
+**Prerequisites:**  Node.js
 
-## Development
 
-```bash
-cd explorer/aurascan-preview
-npm install
-npm run dev
-```
-
-## Build
-
-```bash
-npm run build
-```
-
-> `dist/` is generated output and is not committed by default.
-
-## API + RPC
-
-The preview nginx proxies:
-
-- Blockscout API via `/api/*` (to Blockscout backend on the same host)
-- RPC via `/rpc1/`
-
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`
