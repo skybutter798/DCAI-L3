@@ -549,7 +549,7 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
   );
 };
 
-const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => void, onViewAddress: (a: string) => void }) => {
+const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: string) => void, onViewAddress: (a: string) => void, onViewBlock: (h: number) => void }) => {
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -754,8 +754,23 @@ const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => voi
                     </button>
                   </div>
 
-                  <div className="mt-1 text-[10px] font-mono text-gold-500/45">
-                    block {tx.block ?? tx.block_number ?? '--'} · pos {tx.position ?? '--'} · status {String(tx.status ?? tx.result ?? '--')} · conf {tx.confirmations ?? '--'}
+                  <div className="mt-1 text-[10px] font-mono text-gold-500/45 flex flex-wrap gap-x-2 gap-y-1 items-center">
+                    <span>
+                      <span className="text-gold-500/35">block</span>{' '}
+                      {tx.block_number != null ? (
+                        <button
+                          onClick={() => onViewBlock(Number(tx.block_number))}
+                          className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                        >
+                          #{String(tx.block_number)}
+                        </button>
+                      ) : (
+                        <span className="text-gold-400">--</span>
+                      )}
+                    </span>
+                    <span>· pos {tx.position ?? '--'}</span>
+                    <span>· status {String(tx.status ?? tx.result ?? '--')}</span>
+                    <span>· conf {tx.confirmations ?? '--'}</span>
                   </div>
 
                   <div className="mt-2 text-[10px] font-mono text-gold-500/40 flex flex-col gap-1">
@@ -2496,6 +2511,7 @@ export default function App() {
             key="txs"
             onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
             onViewAddress={(a: string) => handleViewAddress(a)}
+            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
           />
         ) : currentView === 'tx' ? (
           <TxView
