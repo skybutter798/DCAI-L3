@@ -2133,6 +2133,9 @@ export default function App() {
   const latestHeightRef = useRef<number | null>(null);
   const lastNewBlockAtRef = useRef<number>(Date.now());
 
+  // Cache clique recents mapping so the validator label doesn't flicker to "--" on transient RPC errors.
+  const cliqueRecentsRef = useRef<Record<string, string>>({});
+
 
   const timeAgo = (iso?: string) => {
     try {
@@ -2175,8 +2178,8 @@ export default function App() {
         const data = await res.json();
         const apiItems = (data?.items || []).slice(0, 15);
 
-        // Clique snapshot for real signer per block
-        let recents: Record<string, string> = {};
+        // Clique snapshot for real signer per block (cached to avoid flicker on transient RPC issues)
+        let recents: Record<string, string> = cliqueRecentsRef.current || {};
         try {
           const snapRes = await fetch('/rpc1/', {
             method: 'POST',
@@ -2184,7 +2187,11 @@ export default function App() {
             body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'clique_getSnapshot', params: ['latest'] }),
           });
           const snap = await snapRes.json();
-          recents = snap?.result?.recents || {};
+          const next = snap?.result?.recents;
+          if (next && typeof next === 'object' && Object.keys(next).length) {
+            cliqueRecentsRef.current = next as Record<string, string>;
+            recents = next as Record<string, string>;
+          }
         } catch {}
 
         const short = (addr: string) => (addr ? (addr.slice(0, 6) + '…' + addr.slice(-4)) : '--');
@@ -2309,7 +2316,8 @@ export default function App() {
     fetchBlocks();
     fetchTxs();
 
-    const bInt = setInterval(fetchBlocks, 2000);
+    // Fallback refresh (new blocks are mainly detected via eth_blockNumber polling above)
+    const bInt = setInterval(fetchBlocks, 8000);
     const tInt = setInterval(fetchTxs, 3000);
 
     return () => {
