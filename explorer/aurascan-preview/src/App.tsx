@@ -3108,6 +3108,22 @@ const DashboardView = () => {
         </div>
         <div className="mt-2 text-[10px] font-mono text-gold-500/50">chainId <span className="text-cyan-300">18441</span> · native <span className="text-cyan-300">tDCAI</span></div>
 
+        <div className="mt-4 rounded-xl border border-gold-500/10 bg-dark-950/30 p-4">
+          <div className="text-[10px] font-mono text-gold-500/50">Other public endpoints</div>
+          <div className="mt-2 space-y-1 text-[11px] font-mono">
+            <div className="text-gold-500/70">Explorer UI: <span className="text-cyan-200/90 break-all">{publicBase}/</span></div>
+            <div className="text-gold-500/70">Faucet UI: <span className="text-cyan-200/90 break-all">{publicBase}/faucet/</span></div>
+            <div className="text-gold-500/70">Faucet API: <span className="text-cyan-200/90 break-all">POST {publicBase}/faucet/request</span></div>
+            <div className="text-gold-500/70">Rewards: <span className="text-cyan-200/90 break-all">{publicBase}/rewards/</span></div>
+            <div className="text-gold-500/70">Rewards latest.json: <span className="text-cyan-200/90 break-all">{publicBase}/rewards/latest.json</span></div>
+            <div className="pt-2 text-gold-500/40">API key self-service (wallet signature):</div>
+            <div className="text-gold-500/70">Nonce: <span className="text-cyan-200/90 break-all">GET {publicBase}/admin/api/auth/nonce?address=0x...</span></div>
+            <div className="text-gold-500/70">Apply: <span className="text-cyan-200/90 break-all">POST {publicBase}/admin/api/apikey/request</span></div>
+            <div className="text-gold-500/70">Reveal: <span className="text-cyan-200/90 break-all">POST {publicBase}/admin/api/apikey/reveal</span></div>
+            <div className="pt-2 text-gold-500/30">(Admin-only endpoints live under /admin/ and /admin/api/* with X-Admin-Token.)</div>
+          </div>
+        </div>
+
         {revealedKeys && revealedKeys.length ? (
           <div className="mt-4 space-y-3">
             {revealedKeys.map((k, i) => {
