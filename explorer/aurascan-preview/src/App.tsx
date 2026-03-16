@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
+import { ethers } from 'ethers';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 
 function navigateTo(path: string) {
@@ -90,12 +91,14 @@ const Header = ({
   onBlocks,
   onTxs,
   onTokens,
+  onDashboard,
 }: {
-  active: 'home' | 'blocks' | 'txs' | 'tx' | 'block' | 'address' | 'tokens' | 'token',
+  active: 'home' | 'blocks' | 'txs' | 'tx' | 'block' | 'address' | 'tokens' | 'token' | 'dashboard',
   onHome: () => void,
   onBlocks: () => void,
   onTxs: () => void,
   onTokens: () => void,
+  onDashboard: () => void,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -130,7 +133,7 @@ const Header = ({
           <NavItem label="TRANSACTIONS" isActive={active === 'txs' || active === 'tx'} onClick={() => { setMobileOpen(false); onTxs(); }} />
           <NavItem label="TOKENS" isActive={active === 'tokens' || active === 'token'} onClick={() => { setMobileOpen(false); onTokens(); }} />
           <NavItem label="NODES" onClick={() => { /* next */ }} />
-          <NavItem label="API" onClick={() => { /* next */ }} />
+          <NavItem label="API" isActive={active === 'dashboard'} onClick={() => { setMobileOpen(false); onDashboard(); }} />
         </nav>
 
         <div className="flex items-center gap-3">
@@ -162,7 +165,7 @@ const Header = ({
               <NavItem label="TRANSACTIONS" isActive={active === 'txs' || active === 'tx'} onClick={() => { setMobileOpen(false); onTxs(); }} />
               <NavItem label="TOKENS" isActive={active === 'tokens' || active === 'token'} onClick={() => { setMobileOpen(false); onTokens(); }} />
               <NavItem label="NODES" onClick={() => { setMobileOpen(false); }} />
-              <NavItem label="API" onClick={() => { setMobileOpen(false); }} />
+              <NavItem label="API" isActive={active === 'dashboard'} onClick={() => { setMobileOpen(false); onDashboard(); }} />
               <button className="mt-2 glow-box px-4 py-2 rounded text-xs font-mono font-bold border-cyan-500/50 text-cyan-300 hover:bg-cyan-500 hover:text-dark-900 transition-all">
                 CONNECT WALLET
               </button>
@@ -2832,8 +2835,287 @@ const TokenView = ({
   );
 };
 
+const DashboardView = () => {
+  const STAKE_CONTRACT = '0x54ff6c64f1f7915a3aD54743aDd92b32412B06BC';
+
+  const apiBase = (() => {
+    try {
+      return `${window.location.protocol}//${window.location.hostname}/admin/api`;
+    } catch {
+      return 'http://139.180.140.143/admin/api';
+    }
+  })();
+
+  const publicBase = (() => {
+    try {
+      return `${window.location.protocol}//${window.location.hostname}`;
+    } catch {
+      return 'http://139.180.140.143';
+    }
+  })();
+
+  const [addr, setAddr] = useState<string | null>(null);
+  const [chainId, setChainId] = useState<number | null>(null);
+  const [stake, setStake] = useState<{ tier: number; stakeWei: string; requestedAt: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState('');
+  const [tier, setTier] = useState<'basic' | 'pro' | 'ultra'>('basic');
+  const [lastReq, setLastReq] = useState<any>(null);
+  const [revealedKeys, setRevealedKeys] = useState<any[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const tiers = {
+    basic: { label: 'Basic', enum: 1, stake: '1000', rate: '10 r/s', burst: '40' },
+    pro: { label: 'Pro', enum: 2, stake: '5000', rate: '50 r/s', burst: '200' },
+    ultra: { label: 'Ultra', enum: 3, stake: '10000', rate: '200 r/s', burst: '800' },
+  } as const;
+
+  const connect = async () => {
+    setErr(null);
+    const eth = (window as any).ethereum;
+    if (!eth) {
+      setErr('No wallet detected (install MetaMask).');
+      return;
+    }
+    try {
+      setBusy('Connecting wallet…');
+      const provider = new ethers.BrowserProvider(eth);
+      await provider.send('eth_requestAccounts', []);
+      const signer = await provider.getSigner();
+      const a = await signer.getAddress();
+      const net = await provider.getNetwork();
+      setAddr(a);
+      setChainId(Number(net.chainId));
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const refreshStake = async () => {
+    if (!addr) return;
+    setErr(null);
+    try {
+      setBusy('Loading stake status…');
+      const eth = (window as any).ethereum;
+      const provider = new ethers.BrowserProvider(eth);
+      const c = new ethers.Contract(
+        STAKE_CONTRACT,
+        ['function getStake(address) view returns (uint8 tier, uint256 stakeWei, uint256 requestedAt)'],
+        provider
+      );
+      const [t, s, r] = await c.getStake(addr);
+      setStake({ tier: Number(t), stakeWei: String(s), requestedAt: String(r) });
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  useEffect(() => {
+    if (addr) refreshStake();
+  }, [addr]);
+
+  const doStake = async (tierKey: 'basic' | 'pro' | 'ultra') => {
+    setErr(null);
+    const eth = (window as any).ethereum;
+    if (!eth) return;
+    try {
+      setBusy('Sending stake tx…');
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+      const c = new ethers.Contract(
+        STAKE_CONTRACT,
+        ['function stake(uint8 tier) payable'],
+        signer
+      );
+      const v = ethers.parseEther(tiers[tierKey].stake);
+      const tx = await c.stake(tiers[tierKey].enum, { value: v });
+      await tx.wait();
+      await refreshStake();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const requestApiKey = async () => {
+    if (!addr) return;
+    setErr(null);
+    try {
+      setBusy('Requesting API key (sign message)…');
+      const eth = (window as any).ethereum;
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+
+      const nonceRes = await fetch(`${apiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
+      const nonceJson = await nonceRes.json();
+      const nonce = nonceJson?.nonce;
+      if (!nonce) throw new Error('Failed to get nonce');
+
+      const message = `DCAI API Key Request\nAddress: ${addr}\nTier: ${tier}\nNonce: ${nonce}`;
+      const signature = await signer.signMessage(message);
+
+      const res = await fetch(`${apiBase}/apikey/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: addr, tier, note, signature }),
+      });
+      const j = await res.json();
+      setLastReq(j);
+      if (!j?.ok) setErr(j?.error || 'Request failed');
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const revealMyKeys = async () => {
+    if (!addr) return;
+    setErr(null);
+    try {
+      setBusy('Revealing keys (sign message)…');
+      const eth = (window as any).ethereum;
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+
+      const nonceRes = await fetch(`${apiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
+      const nonceJson = await nonceRes.json();
+      const nonce = nonceJson?.nonce;
+      if (!nonce) throw new Error('Failed to get nonce');
+
+      const message = `DCAI API Key Reveal\nAddress: ${addr}\nNonce: ${nonce}`;
+      const signature = await signer.signMessage(message);
+
+      const res = await fetch(`${apiBase}/apikey/reveal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: addr, signature }),
+      });
+      const j = await res.json();
+      if (!j?.ok) throw new Error(j?.error || 'Reveal failed');
+      setRevealedKeys(j?.keys || []);
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const endpointFor = (tierKey: string, key: string) => {
+    return {
+      http: `${publicBase}/rpc/${tierKey}/${key}/`,
+      ws: `${publicBase.replace('http', 'ws')}/ws/${tierKey}/${key}/`,
+    };
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
+    >
+      <div className="mb-6 flex items-center gap-4">
+        <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/20 shadow-[0_0_20px_rgba(0,240,255,0.10)]">
+          <Code2 className="w-8 h-8 text-cyan-400" />
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-3xl md:text-4xl font-black tracking-widest">API <span className="glow-text-cyan text-cyan-300">DASHBOARD</span></h1>
+          <div className="mt-2 text-xs font-mono text-gold-500/60">Stake tDCAI → Apply → Admin approve → Get API key</div>
+        </div>
+      </div>
+
+      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30 mb-8">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-xs font-mono text-gold-500/50">WALLET</div>
+            <div className="mt-1 text-sm font-mono text-cyan-200/90 break-all">{addr || '-- not connected --'}</div>
+            <div className="mt-1 text-[10px] font-mono text-gold-500/40">chainId {chainId ?? '--'} · stake contract {STAKE_CONTRACT}</div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={connect} className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">CONNECT</button>
+            <button disabled={!addr} onClick={refreshStake} className={`px-3 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-gold-500/20 text-gold-500/80 hover:border-cyan-500/40 hover:text-cyan-300' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>REFRESH</button>
+          </div>
+        </div>
+
+        {err ? <div className="mt-3 text-[11px] font-mono text-rose-300">{err}</div> : null}
+        {busy ? <div className="mt-3 text-[11px] font-mono text-gold-500/60">{busy}</div> : null}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        {(['basic','pro','ultra'] as const).map((k) => (
+          <div key={k} className="rounded-2xl border border-gold-500/15 bg-dark-900/40 p-5">
+            <div className="text-xs font-mono text-gold-500/50">{tiers[k].label.toUpperCase()}</div>
+            <div className="mt-2 text-lg font-mono text-cyan-200/90">Stake {tiers[k].stake} tDCAI</div>
+            <div className="mt-1 text-[10px] font-mono text-gold-500/40">limit {tiers[k].rate} · burst {tiers[k].burst}</div>
+            <button
+              disabled={!addr}
+              onClick={() => { setTier(k); doStake(k); }}
+              className={`mt-4 w-full px-3 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-cyan-500/20 text-cyan-300 hover:border-cyan-400/60' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}
+            >
+              STAKE & SELECT
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30 mb-8">
+        <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-gold-500">
+          <CheckCircle2 className="w-5 h-5" /> APPLY
+        </h2>
+        <div className="mt-2 text-xs font-mono text-gold-500/60">Selected tier: <span className="text-cyan-300">{tier}</span></div>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Tell us your intended usage (optional)…"
+          className="mt-4 w-full min-h-[90px] bg-dark-900/50 border border-gold-500/15 rounded-xl p-3 text-xs font-mono text-gold-500/80 outline-none"
+        />
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button disabled={!addr} onClick={requestApiKey} className={`px-4 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-cyan-500/20 text-cyan-300 hover:border-cyan-400/60' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>SUBMIT REQUEST</button>
+          <button disabled={!addr} onClick={revealMyKeys} className={`px-4 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-gold-500/20 text-gold-500/80 hover:border-cyan-500/40 hover:text-cyan-300' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>REVEAL MY KEYS</button>
+        </div>
+
+        {lastReq ? (
+          <pre className="mt-4 text-[10px] font-mono text-gold-500/60 whitespace-pre-wrap break-all">{JSON.stringify(lastReq, null, 2)}</pre>
+        ) : null}
+      </div>
+
+      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
+        <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
+          <Code2 className="w-5 h-5" /> ENDPOINTS
+        </h2>
+
+        {revealedKeys && revealedKeys.length ? (
+          <div className="mt-4 space-y-3">
+            {revealedKeys.map((k, i) => {
+              const e = endpointFor(String(k.tier), String(k.key));
+              return (
+                <div key={i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
+                  <div className="text-xs font-mono text-gold-500/60">tier <span className="text-cyan-300">{k.tier}</span></div>
+                  <div className="mt-1 text-[11px] font-mono text-gold-500/70 break-all">key {k.key}</div>
+                  <div className="mt-3 text-[11px] font-mono text-gold-500/60">HTTP</div>
+                  <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.http}</div>
+                  <div className="mt-2 text-[11px] font-mono text-gold-500/60">WS</div>
+                  <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.ws}</div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-4 text-xs font-mono text-gold-500/60">No active keys revealed yet.</div>
+        )}
+      </div>
+    </motion.div>
+  );
+};
+
 export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'blocks' | 'txs' | 'block' | 'tx' | 'address' | 'tokens' | 'token'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'blocks' | 'txs' | 'block' | 'tx' | 'address' | 'tokens' | 'token' | 'dashboard'>('home');
   const [selectedBlock, setSelectedBlock] = useState<any>(null);
   const [selectedTxHash, setSelectedTxHash] = useState<string | null>(null);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
@@ -2857,6 +3139,11 @@ export default function App() {
 
         if (path === '/tokens' || path === '/tokens/') {
           setCurrentView('tokens');
+          return;
+        }
+
+        if (path === '/dashboard' || path === '/dashboard/') {
+          setCurrentView('dashboard');
           return;
         }
 
@@ -3225,6 +3512,7 @@ export default function App() {
         onBlocks={() => { setCurrentView('blocks'); try { window.history.pushState({ view: 'blocks' }, '', '/blocks'); } catch {} }}
         onTxs={() => { setCurrentView('txs'); try { window.history.pushState({ view: 'txs' }, '', '/txs'); } catch {} }}
         onTokens={() => { setCurrentView('tokens'); try { window.history.pushState({ view: 'tokens' }, '', '/tokens'); } catch {} }}
+        onDashboard={() => { setCurrentView('dashboard'); try { window.history.pushState({ view: 'dashboard' }, '', '/dashboard'); } catch {} }}
       />
       
       <AnimatePresence mode="wait">
@@ -3482,6 +3770,8 @@ export default function App() {
             onViewToken={(a: string) => handleViewToken(a)}
             onViewAddress={(a: string) => handleViewAddress(a)}
           />
+        ) : currentView === 'dashboard' ? (
+          <DashboardView key="dashboard" />
         ) : currentView === 'token' ? (
           <TokenView
             key="token"
