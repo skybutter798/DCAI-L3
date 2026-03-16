@@ -549,7 +549,7 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
   );
 };
 
-const TxsListView = ({ onViewTx }: { onViewTx: (h: string) => void }) => {
+const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => void, onViewAddress: (a: string) => void }) => {
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -570,6 +570,30 @@ const TxsListView = ({ onViewTx }: { onViewTx: (h: string) => void }) => {
   const [prevStack, setPrevStack] = useState<any[]>([]);
 
   const short = (s: string, a = 12, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
+
+  const fmtTDCAI = (weiLike: any, dp = 6) => {
+    try {
+      const wei = BigInt(String(weiLike ?? '0'));
+      const s = wei.toString();
+      const pad = s.length <= 18 ? '0'.repeat(18 - s.length + 1) + s : s;
+      const head = pad.slice(0, -18);
+      const tail = pad.slice(-18);
+      return `${head}.${tail.slice(0, dp)}`;
+    } catch {
+      return '--';
+    }
+  };
+
+  const methodLabel = (tx: any) => {
+    try {
+      if (tx?.created_contract?.hash) return 'CONTRACT CREATE';
+      const ri = String(tx?.raw_input || '');
+      if (!ri || ri === '0x' || ri.length < 10) return 'TRANSFER';
+      return ri.slice(0, 10);
+    } catch {
+      return '—';
+    }
+  };
 
   const setTxsUrl = (p: any | null, replace = false) => {
     try {
@@ -680,22 +704,54 @@ const TxsListView = ({ onViewTx }: { onViewTx: (h: string) => void }) => {
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <button
-                    onClick={() => onViewTx(String(tx.hash))}
-                    className="text-left text-sm font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60 break-all"
-                  >
-                    {String(tx.hash)}
-                  </button>
-                  <div className="mt-1 text-[10px] font-mono text-gold-500/45">
-                    block {tx.block ?? '--'} · pos {tx.position ?? '--'} · status {String(tx.status ?? tx.result ?? '--')}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-mono tracking-widest px-2 py-0.5 rounded border border-cyan-500/20 bg-cyan-500/10 text-cyan-300">
+                      {methodLabel(tx)}
+                    </span>
+                    <button
+                      onClick={() => onViewTx(String(tx.hash))}
+                      className="text-left text-[11px] font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60 break-all"
+                    >
+                      {String(tx.hash)}
+                    </button>
                   </div>
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/40">
-                    from {short(String(tx.from?.hash || ''))} → to {short(String(tx.to?.hash || tx.created_contract?.hash || ''))}
+
+                  <div className="mt-1 text-[10px] font-mono text-gold-500/45">
+                    block {tx.block ?? tx.block_number ?? '--'} · pos {tx.position ?? '--'} · status {String(tx.status ?? tx.result ?? '--')} · conf {tx.confirmations ?? '--'}
+                  </div>
+
+                  <div className="mt-2 text-[10px] font-mono text-gold-500/40 flex flex-col gap-1">
+                    <div>
+                      <span className="text-gold-500/35">from</span>{' '}
+                      <button onClick={() => tx?.from?.hash && onViewAddress(String(tx.from.hash))} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">
+                        {short(String(tx.from?.hash || ''))}
+                      </button>
+                    </div>
+                    <div>
+                      <span className="text-gold-500/35">to</span>{' '}
+                      {tx?.created_contract?.hash ? (
+                        <button onClick={() => onViewAddress(String(tx.created_contract.hash))} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">
+                          {short(String(tx.created_contract.hash))}
+                        </button>
+                      ) : (
+                        <button onClick={() => tx?.to?.hash && onViewAddress(String(tx.to.hash))} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">
+                          {short(String(tx.to?.hash || ''))}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
+
                 <div className="shrink-0 text-right">
-                  <div className="text-xs font-mono text-gold-500/85">{String(tx.value ?? '0')} wei</div>
-                  <div className="mt-1 text-[10px] font-mono text-gold-500/40">conf {tx.confirmations ?? '--'}</div>
+                  <div className="text-xs font-mono text-gold-500/90">
+                    {fmtTDCAI(tx.value)} <span className="text-gold-500/60">tDCAI</span>
+                  </div>
+                  <div className="text-[10px] font-mono text-gold-500/35">{String(tx.value ?? '0')} wei</div>
+
+                  <div className="mt-2 text-[10px] font-mono text-gold-500/70">
+                    fee {fmtTDCAI(tx.fee?.value ?? tx.fee ?? '0')} <span className="text-gold-500/50">tDCAI</span>
+                  </div>
+                  <div className="text-[10px] font-mono text-gold-500/35">{String(tx.fee?.value ?? tx.fee ?? '0')} wei</div>
                 </div>
               </div>
             </motion.div>
@@ -2370,6 +2426,7 @@ export default function App() {
           <TxsListView
             key="txs"
             onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
+            onViewAddress={(a: string) => handleViewAddress(a)}
           />
         ) : currentView === 'tx' ? (
           <TxView
