@@ -2135,6 +2135,9 @@ export default function App() {
 
   // Cache clique recents mapping so the validator label doesn't flicker to "--" on transient RPC errors.
   const cliqueRecentsRef = useRef<Record<string, string>>({});
+  // Cache resolved signer per height (Clique recents only covers a tiny window).
+  const signerByHeightRef = useRef<Record<number, string>>({});
+  const signerInflightRef = useRef<Set<number>>(new Set());
 
 
   const timeAgo = (iso?: string) => {
@@ -2210,7 +2213,7 @@ export default function App() {
 
         const items = apiItems.map((b: any) => {
           const height = Number(b.height);
-          const signer = (recents[String(height)] || '').toLowerCase();
+          const signer = (signerByHeightRef.current[height] || recents[String(height)] || '').toLowerCase();
           const rewardWei = b.transaction_fees ?? '0';
           return {
             height,
@@ -2252,6 +2255,63 @@ export default function App() {
           }
 
           setBlocks(items);
+
+          // Resolve signer for blocks outside Clique "recents" window (do it once per height, cached)
+          const missingHeights = Array.from(
+            new Set(
+              items
+                .map((x: any) => Number(x.height))
+                .filter(
+                  (h: number) =>
+                    Number.isFinite(h) &&
+                    !signerByHeightRef.current[h] &&
+                    !(recents[String(h)] || '').toLowerCase()
+                )
+            )
+          ).slice(0, 10);
+
+          const toFetch = missingHeights.filter((h) => !signerInflightRef.current.has(h));
+          toFetch.forEach((h) => signerInflightRef.current.add(h));
+
+          if (toFetch.length) {
+            (async () => {
+              const updates: Record<number, string> = {};
+
+              for (const h of toFetch) {
+                try {
+                  const hex = '0x' + h.toString(16);
+                  const snapRes = await fetch('/rpc1/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'clique_getSnapshot', params: [hex] }),
+                  });
+                  const snap = await snapRes.json();
+                  const signer = String(snap?.result?.recents?.[String(h)] || '').toLowerCase();
+                  if (signer) updates[h] = signer;
+                } catch {
+                  // ignore
+                } finally {
+                  signerInflightRef.current.delete(h);
+                }
+              }
+
+              const ks = Object.keys(updates);
+              if (!ks.length) return;
+
+              for (const k of ks) signerByHeightRef.current[Number(k)] = updates[Number(k)];
+
+              if (!cancelled) {
+                const short = (addr: string) => (addr ? addr.slice(0, 6) + '…' + addr.slice(-4) : '--');
+                setBlocks((prev) =>
+                  (prev || []).map((b: any) => {
+                    const s = updates[Number(b.height)];
+                    if (!s) return b;
+                    return { ...b, validator: s, miner: short(s) };
+                  })
+                );
+              }
+            })();
+          }
         }
       } catch {}
     };
