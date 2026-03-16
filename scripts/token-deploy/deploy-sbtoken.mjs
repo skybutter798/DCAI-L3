@@ -25,6 +25,7 @@ function compile(contractPath) {
     },
     settings: {
       optimizer: { enabled: true, runs: 200 },
+      evmVersion: getEnv('EVM_VERSION', 'london'),
       outputSelection: {
         '*': {
           '*': ['abi', 'evm.bytecode.object'],
