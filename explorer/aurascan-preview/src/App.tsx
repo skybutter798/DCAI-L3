@@ -595,6 +595,24 @@ const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => voi
     }
   };
 
+  const timeAgo = (iso?: string) => {
+    try {
+      if (!iso) return '--';
+      const ms = Date.now() - new Date(iso).getTime();
+      const s = Math.floor(ms / 1000);
+      if (s < 5) return 'just now';
+      if (s < 60) return `${s}s ago`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m ago`;
+      const h = Math.floor(m / 60);
+      if (h < 48) return `${h}h ago`;
+      const d = Math.floor(h / 24);
+      return `${d}d ago`;
+    } catch {
+      return '--';
+    }
+  };
+
   const setTxsUrl = (p: any | null, replace = false) => {
     try {
       const sp = new URLSearchParams();
@@ -743,7 +761,10 @@ const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => voi
                 </div>
 
                 <div className="shrink-0 text-right">
-                  <div className="text-xs font-mono text-gold-500/90">
+                  <div className="text-[10px] font-mono text-gold-500/60">{timeAgo(String(tx.timestamp || ''))}</div>
+                  <div className="text-[10px] font-mono text-gold-500/35">{String(tx.timestamp || '').replace('T', ' ').replace('Z', '')}</div>
+
+                  <div className="mt-2 text-xs font-mono text-gold-500/90">
                     {fmtTDCAI(tx.value)} <span className="text-gold-500/60">tDCAI</span>
                   </div>
                   <div className="text-[10px] font-mono text-gold-500/35">{String(tx.value ?? '0')} wei</div>
