@@ -1351,8 +1351,43 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
             <DetailRow label="RESULT" value={tx?.result || '--'} />
             <DetailRow label="BLOCK" value={(tx?.block_number ?? tx?.block) != null ? `#${tx.block_number ?? tx.block}` : '--'} isCyan />
             <DetailRow label="POSITION" value={tx?.position ?? '--'} />
-            <DetailRow label="FROM" value={tx?.from?.hash || '--'} isCyan onCopy={() => tx?.from?.hash && copy('FROM', tx.from.hash)} />
-            <DetailRow label="TO" value={tx?.to?.hash || '--'} onCopy={() => tx?.to?.hash && copy('TO', tx.to.hash)} />
+            <div className="flex flex-col gap-2 border-b border-gold-500/10 pb-4">
+              <span className="text-xs font-mono text-gold-500/50">FROM</span>
+              <div className="flex items-start justify-between gap-3">
+                {tx?.from?.hash ? (
+                  <button
+                    onClick={() => onViewAddress(String(tx.from.hash))}
+                    className="text-left text-sm font-mono break-all text-cyan-400 glow-text-cyan hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                  >
+                    {String(tx.from.hash)}
+                  </button>
+                ) : (
+                  <div className="text-sm font-mono break-all text-gold-400">--</div>
+                )}
+                {tx?.from?.hash ? (
+                  <button onClick={() => copy('FROM', String(tx.from.hash))} className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 border-b border-gold-500/10 pb-4">
+              <span className="text-xs font-mono text-gold-500/50">TO</span>
+              <div className="flex items-start justify-between gap-3">
+                {tx?.to?.hash ? (
+                  <button
+                    onClick={() => onViewAddress(String(tx.to.hash))}
+                    className="text-left text-sm font-mono break-all text-gold-400 hover:text-cyan-300 underline decoration-gold-500/20 hover:decoration-cyan-400/60"
+                  >
+                    {String(tx.to.hash)}
+                  </button>
+                ) : (
+                  <div className="text-sm font-mono break-all text-gold-400">--</div>
+                )}
+                {tx?.to?.hash ? (
+                  <button onClick={() => copy('TO', String(tx.to.hash))} className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
+                ) : null}
+              </div>
+            </div>
             <DetailRow label="VALUE" value={`${fmtTDCAI(tx?.value)} tDCAI`} isCyan />
             <DetailRow label="FEE (wei)" value={tx?.fee?.value ?? tx?.fee ?? '--'} />
             <DetailRow label="GAS USED" value={tx?.gas_used ?? '--'} />
