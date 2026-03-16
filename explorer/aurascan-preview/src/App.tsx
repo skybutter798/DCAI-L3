@@ -315,7 +315,8 @@ const Stats = () => {
     loadHead();
     loadLiveTxCounters();
     const t = setInterval(load, 30000);
-    const t2 = setInterval(loadLatest, 2000);
+    // Indexed height doesn't need to be ultra-fast (Blockscout can lag behind head anyway)
+    const t2 = setInterval(loadLatest, 5000);
     const tHead = setInterval(loadHead, 1000);
     const t3 = setInterval(loadLiveTxCounters, 4000);
     return () => {
