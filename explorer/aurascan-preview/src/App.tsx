@@ -3348,6 +3348,22 @@ const DashboardView = () => {
                   <div className="mt-1 text-[11px] font-mono text-gold-500/70 break-all">key {k.key}</div>
                   <div className="mt-2 text-[10px] font-mono text-gold-500/50">
                     usage today <span className="text-cyan-200/90">{k?.usage?.today ?? '--'}</span> · last 5m <span className="text-cyan-200/90">{k?.usage?.last5m ?? '--'}</span> · last 60m <span className="text-cyan-200/90">{k?.usage?.last60m ?? '--'}</span>
+                    <div className="mt-1 text-gold-500/50">
+                      status (60m)
+                      {' '}2xx <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['2xx'] ?? 0}</span>
+                      {' '}· 4xx <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['4xx'] ?? 0}</span>
+                      {' '}· 5xx <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['5xx'] ?? 0}</span>
+                      {' '}· 401 <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['401'] ?? 0}</span>
+                      {' '}· 429 <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['429'] ?? 0}</span>
+                    </div>
+                    <div className="mt-1 text-gold-500/50">
+                      top methods (60m)
+                      {Array.isArray(k?.usage?.topMethodsLast60m) && k.usage.topMethodsLast60m.length ? (
+                        <span className="text-cyan-200/90">{' '}{k.usage.topMethodsLast60m.slice(0, 6).map((m: any) => `${m.method}:${m.count}`).join(' · ')}</span>
+                      ) : (
+                        <span className="text-cyan-200/90"> --</span>
+                      )}
+                    </div>
                   </div>
                   <div className="mt-3 text-[11px] font-mono text-gold-500/60">HTTP</div>
                   <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.http}</div>
