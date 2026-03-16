@@ -3108,21 +3108,115 @@ const DashboardView = () => {
         </div>
         <div className="mt-2 text-[10px] font-mono text-gold-500/50">chainId <span className="text-cyan-300">18441</span> · native <span className="text-cyan-300">tDCAI</span></div>
 
-        <div className="mt-4 rounded-xl border border-gold-500/10 bg-dark-950/30 p-4">
-          <div className="text-[10px] font-mono text-gold-500/50">Other public endpoints</div>
-          <div className="mt-2 space-y-1 text-[11px] font-mono">
-            <div className="text-gold-500/70">Explorer UI: <span className="text-cyan-200/90 break-all">{publicBase}/</span></div>
-            <div className="text-gold-500/70">Faucet UI: <span className="text-cyan-200/90 break-all">{publicBase}/faucet/</span></div>
-            <div className="text-gold-500/70">Faucet API: <span className="text-cyan-200/90 break-all">POST {publicBase}/faucet/request</span></div>
-            <div className="text-gold-500/70">Rewards: <span className="text-cyan-200/90 break-all">{publicBase}/rewards/</span></div>
-            <div className="text-gold-500/70">Rewards latest.json: <span className="text-cyan-200/90 break-all">{publicBase}/rewards/latest.json</span></div>
-            <div className="pt-2 text-gold-500/40">API key self-service (wallet signature):</div>
-            <div className="text-gold-500/70">Nonce: <span className="text-cyan-200/90 break-all">GET {publicBase}/admin/api/auth/nonce?address=0x...</span></div>
-            <div className="text-gold-500/70">Apply: <span className="text-cyan-200/90 break-all">POST {publicBase}/admin/api/apikey/request</span></div>
-            <div className="text-gold-500/70">Reveal: <span className="text-cyan-200/90 break-all">POST {publicBase}/admin/api/apikey/reveal</span></div>
-            <div className="pt-2 text-gold-500/30">(Admin-only endpoints live under /admin/ and /admin/api/* with X-Admin-Token.)</div>
+        <details className="mt-4 rounded-xl border border-gold-500/10 bg-dark-950/30 p-4">
+          <summary className="cursor-pointer select-none text-[10px] font-mono text-gold-500/60 hover:text-cyan-300">
+            Supported Ethereum JSON-RPC methods (as complete as possible)
+          </summary>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px] font-mono">
+            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
+              <div className="text-gold-500/50">web3_*</div>
+              <div className="mt-2 text-gold-500/70 space-y-1">
+                <div>web3_clientVersion</div>
+                <div>web3_sha3</div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
+              <div className="text-gold-500/50">net_*</div>
+              <div className="mt-2 text-gold-500/70 space-y-1">
+                <div>net_version</div>
+                <div>net_listening</div>
+                <div>net_peerCount</div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
+              <div className="text-gold-500/50">eth_* (node status / basics)</div>
+              <div className="mt-2 text-gold-500/70 space-y-1">
+                <div>eth_protocolVersion</div>
+                <div>eth_syncing</div>
+                <div>eth_coinbase</div>
+                <div>eth_mining</div>
+                <div>eth_hashrate</div>
+                <div>eth_gasPrice</div>
+                <div>eth_feeHistory</div>
+                <div>eth_maxPriorityFeePerGas</div>
+                <div>eth_accounts</div>
+                <div>eth_chainId</div>
+                <div>eth_blockNumber</div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
+              <div className="text-gold-500/50">eth_* (state / account / contract)</div>
+              <div className="mt-2 text-gold-500/70 space-y-1">
+                <div>eth_getBalance</div>
+                <div>eth_getStorageAt</div>
+                <div>eth_getTransactionCount</div>
+                <div>eth_getCode</div>
+                <div>eth_call</div>
+                <div>eth_estimateGas</div>
+                <div>eth_createAccessList</div>
+                <div>eth_getProof</div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
+              <div className="text-gold-500/50">eth_* (blocks / tx lookup)</div>
+              <div className="mt-2 text-gold-500/70 space-y-1">
+                <div>eth_getBlockByHash</div>
+                <div>eth_getBlockByNumber</div>
+                <div>eth_getTransactionByHash</div>
+                <div>eth_getTransactionReceipt</div>
+                <div>eth_getTransactionByBlockHashAndIndex</div>
+                <div>eth_getTransactionByBlockNumberAndIndex</div>
+                <div>eth_getBlockTransactionCountByHash</div>
+                <div>eth_getBlockTransactionCountByNumber</div>
+                <div>eth_getUncleCountByBlockHash</div>
+                <div>eth_getUncleCountByBlockNumber</div>
+                <div>eth_getUncleByBlockHashAndIndex</div>
+                <div>eth_getUncleByBlockNumberAndIndex</div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
+              <div className="text-gold-500/50">eth_* (logs / filters)</div>
+              <div className="mt-2 text-gold-500/70 space-y-1">
+                <div>eth_newFilter</div>
+                <div>eth_newBlockFilter</div>
+                <div>eth_newPendingTransactionFilter</div>
+                <div>eth_uninstallFilter</div>
+                <div>eth_getFilterChanges</div>
+                <div>eth_getFilterLogs</div>
+                <div>eth_getLogs</div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
+              <div className="text-gold-500/50">eth_* (send / sign / mining work)</div>
+              <div className="mt-2 text-gold-500/70 space-y-1">
+                <div>eth_sign</div>
+                <div>eth_signTransaction</div>
+                <div>eth_sendTransaction</div>
+                <div>eth_sendRawTransaction</div>
+                <div>eth_getWork</div>
+                <div>eth_submitWork</div>
+                <div>eth_submitHashrate</div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3 md:col-span-2">
+              <div className="text-gold-500/50">WS only (PubSub)</div>
+              <div className="mt-2 text-gold-500/70 space-y-1">
+                <div>eth_subscribe (newHeads / logs / newPendingTransactions)</div>
+                <div>eth_unsubscribe</div>
+              </div>
+              <div className="mt-3 text-[10px] text-gold-500/40">
+                Not public by default: <span className="text-gold-500/50">debug_*, admin_*, personal_*, txpool_*, trace_*</span>
+              </div>
+            </div>
           </div>
-        </div>
+        </details>
 
         {revealedKeys && revealedKeys.length ? (
           <div className="mt-4 space-y-3">
