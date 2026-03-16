@@ -175,29 +175,89 @@ const Header = ({
 const Hero = () => {
   const [q, setQ] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
 
-  const doSearch = () => {
-    const s = q.trim();
-    if (!s) return;
+  const doSearch = async () => {
+    const raw = q.trim();
+    if (!raw || searching) return;
     setErr(null);
+    setSearching(true);
 
-    const mBlock = s.match(/^#?(\d+)$/);
-    if (mBlock) {
-      navigateTo(`/block/${mBlock[1]}`);
-      return;
+    const s = raw;
+
+    const norm0x = (h: string) => (h.startsWith('0x') ? h : `0x${h}`);
+
+    try {
+      // block number (123 or #123)
+      const mBlock = s.match(/^#?(\d+)$/);
+      if (mBlock) {
+        navigateTo(`/block/${mBlock[1]}`);
+        return;
+      }
+
+      // address without/with 0x
+      if (/^(0x)?[0-9a-fA-F]{40}$/.test(s)) {
+        navigateTo(`/address/${norm0x(s)}`);
+        return;
+      }
+
+      // 64-hex can be tx hash OR block hash → ask Blockscout search to disambiguate
+      if (/^(0x)?[0-9a-fA-F]{64}$/.test(s)) {
+        const q0 = norm0x(s);
+        const res = await fetch(`/api/v2/search?q=${encodeURIComponent(q0)}`, { cache: 'no-store' });
+        const j = await res.json();
+        const it = j?.items?.[0];
+        if (it?.type === 'transaction' && it?.transaction_hash) {
+          navigateTo(`/tx/${String(it.transaction_hash)}`);
+          return;
+        }
+        if (it?.type === 'block' && (it?.block_number != null || it?.block_hash)) {
+          // Prefer numeric height since our router already supports it
+          if (it.block_number != null) {
+            navigateTo(`/block/${String(it.block_number)}`);
+          } else {
+            navigateTo(`/block/${String(it.block_hash)}`);
+          }
+          return;
+        }
+        // default fallback
+        navigateTo(`/tx/${q0}`);
+        return;
+      }
+
+      // General search (token name, etc.)
+      const res = await fetch(`/api/v2/search?q=${encodeURIComponent(s)}`, { cache: 'no-store' });
+      const j = await res.json();
+      const it = j?.items?.[0];
+      if (!it) {
+        setErr('Not found.');
+        return;
+      }
+
+      if (it.type === 'address' && it.address) {
+        navigateTo(`/address/${String(it.address)}`);
+        return;
+      }
+      if (it.type === 'transaction' && it.transaction_hash) {
+        navigateTo(`/tx/${String(it.transaction_hash)}`);
+        return;
+      }
+      if (it.type === 'block' && it.block_number != null) {
+        navigateTo(`/block/${String(it.block_number)}`);
+        return;
+      }
+      if (it.url) {
+        // Last resort: follow Blockscout-provided URL
+        navigateTo(String(it.url));
+        return;
+      }
+
+      setErr('Not supported yet.');
+    } catch {
+      setErr('Search failed.');
+    } finally {
+      setSearching(false);
     }
-
-    if (/^0x[0-9a-fA-F]{40}$/.test(s)) {
-      navigateTo(`/address/${s}`);
-      return;
-    }
-
-    if (/^0x[0-9a-fA-F]{64}$/.test(s)) {
-      navigateTo(`/tx/${s}`);
-      return;
-    }
-
-    setErr('Invalid query. Try 0x… address / 0x… tx hash / block number.');
   };
 
   return (
@@ -245,9 +305,10 @@ const Hero = () => {
           />
           <button
             onClick={doSearch}
-            className="bg-cyan-500 text-dark-900 px-4 sm:px-8 py-3 rounded-lg font-bold font-mono hover:bg-cyan-400 transition-colors shadow-[0_0_15px_rgba(0,240,255,0.5)]"
+            disabled={searching}
+            className={`bg-cyan-500 text-dark-900 px-4 sm:px-8 py-3 rounded-lg font-bold font-mono transition-colors shadow-[0_0_15px_rgba(0,240,255,0.5)] ${searching ? 'opacity-60 cursor-not-allowed' : 'hover:bg-cyan-400'}`}
           >
-            SCAN
+            {searching ? 'SCANNING…' : 'SCAN'}
           </button>
         </div>
 
