@@ -2864,6 +2864,7 @@ const DashboardView = () => {
   const [lastReq, setLastReq] = useState<any>(null);
   const [revealedKeys, setRevealedKeys] = useState<any[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
 
   const tiers = {
     basic: { label: 'Basic', enum: 1, stake: '1000', rate: '10 r/s', burst: '40' },
@@ -2919,6 +2920,11 @@ const DashboardView = () => {
     if (addr) refreshStake();
   }, [addr]);
 
+  useEffect(() => {
+    const t = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   const doStake = async (tierKey: 'basic' | 'pro' | 'ultra') => {
     setErr(null);
     const eth = (window as any).ethereum;
@@ -2934,6 +2940,54 @@ const DashboardView = () => {
       );
       const v = ethers.parseEther(tiers[tierKey].stake);
       const tx = await c.stake(tiers[tierKey].enum, { value: v });
+      await tx.wait();
+      await refreshStake();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const requestUnstake = async () => {
+    if (!addr) return;
+    setErr(null);
+    const eth = (window as any).ethereum;
+    if (!eth) return;
+    try {
+      setBusy('Requesting unstake (sign tx)…');
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+      const c = new ethers.Contract(
+        STAKE_CONTRACT,
+        ['function requestUnstake()'],
+        signer
+      );
+      const tx = await c.requestUnstake();
+      await tx.wait();
+      await refreshStake();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const withdrawStake = async () => {
+    if (!addr) return;
+    setErr(null);
+    const eth = (window as any).ethereum;
+    if (!eth) return;
+    try {
+      setBusy('Withdrawing stake (sign tx)…');
+      const provider = new ethers.BrowserProvider(eth);
+      const signer = await provider.getSigner();
+      const c = new ethers.Contract(
+        STAKE_CONTRACT,
+        ['function withdraw()'],
+        signer
+      );
+      const tx = await c.withdraw();
       await tx.wait();
       await refreshStake();
     } catch (e: any) {
@@ -3014,6 +3068,34 @@ const DashboardView = () => {
     };
   };
 
+  const stakeTierLabel = (() => {
+    const t = stake?.tier ?? 0;
+    if (t === 1) return 'basic';
+    if (t === 2) return 'pro';
+    if (t === 3) return 'ultra';
+    return 'none';
+  })();
+
+  const stakeAmount = (() => {
+    try {
+      if (!stake?.stakeWei) return '0';
+      return ethers.formatEther(BigInt(stake.stakeWei));
+    } catch {
+      return stake?.stakeWei || '0';
+    }
+  })();
+
+  const requestedAtSec = (() => {
+    try {
+      return Number(stake?.requestedAt || '0');
+    } catch {
+      return 0;
+    }
+  })();
+
+  const cooldownEndsSec = requestedAtSec > 0 ? (requestedAtSec + 86400) : 0;
+  const cooldownLeftSec = cooldownEndsSec > 0 ? (cooldownEndsSec - nowSec) : 0;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -3046,6 +3128,44 @@ const DashboardView = () => {
 
         {err ? <div className="mt-3 text-[11px] font-mono text-rose-300">{err}</div> : null}
         {busy ? <div className="mt-3 text-[11px] font-mono text-gold-500/60">{busy}</div> : null}
+      </div>
+
+      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30 mb-8">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div className="text-xs font-mono text-gold-500/50">CURRENT STAKE</div>
+            <div className="mt-1 text-sm font-mono text-cyan-200/90">tier <span className="text-cyan-300">{stakeTierLabel}</span> · amount <span className="text-cyan-300">{stakeAmount}</span> tDCAI</div>
+            <div className="mt-1 text-[10px] font-mono text-gold-500/40">unstake cooldown: 24h</div>
+            {requestedAtSec > 0 ? (
+              <div className="mt-2 text-[10px] font-mono text-gold-500/60">
+                requestedAt {requestedAtSec} · withdraw {(cooldownLeftSec <= 0) ? <span className="text-emerald-400">available now</span> : <span className="text-yellow-400">in {Math.max(0, cooldownLeftSec)}s</span>}
+              </div>
+            ) : (
+              <div className="mt-2 text-[10px] font-mono text-gold-500/50">No unstake requested.</div>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              disabled={!addr || stakeTierLabel === 'none' || requestedAtSec > 0}
+              onClick={requestUnstake}
+              className={`px-3 py-2 rounded-lg border text-xs font-mono ${(!addr || stakeTierLabel === 'none' || requestedAtSec > 0) ? 'border-gold-500/10 text-gold-500/30 cursor-not-allowed' : 'border-rose-500/30 text-rose-300 hover:border-rose-400/70'}`}
+            >
+              REQUEST UNSTAKE
+            </button>
+            <button
+              disabled={!addr || requestedAtSec <= 0 || cooldownLeftSec > 0}
+              onClick={withdrawStake}
+              className={`px-3 py-2 rounded-lg border text-xs font-mono ${(!addr || requestedAtSec <= 0 || cooldownLeftSec > 0) ? 'border-gold-500/10 text-gold-500/30 cursor-not-allowed' : 'border-emerald-500/30 text-emerald-300 hover:border-emerald-400/70'}`}
+            >
+              WITHDRAW
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 text-[10px] font-mono text-gold-500/40">
+          If you withdraw, we can revoke your API key (policy: key valid while staked). For now revoke is manual from /admin.
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
@@ -3110,7 +3230,7 @@ const DashboardView = () => {
 
         <details className="mt-4 rounded-xl border border-gold-500/10 bg-dark-950/30 p-4">
           <summary className="cursor-pointer select-none text-[10px] font-mono text-gold-500/60 hover:text-cyan-300">
-            Supported Ethereum JSON-RPC methods (as complete as possible)
+            Supported Ethereum JSON-RPC methods
           </summary>
           <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px] font-mono">
             <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
