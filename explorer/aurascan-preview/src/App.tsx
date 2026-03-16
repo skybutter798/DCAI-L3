@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
-import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2 } from 'lucide-react';
+import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 
 function navigateTo(path: string) {
   try {
@@ -84,39 +84,91 @@ const CursorFollower = () => {
   );
 };
 
-const Header = ({ onHome }: { onHome: () => void }) => (
-  <header className="sticky top-0 z-40 bg-dark-900/80 backdrop-blur-md border-b border-gold-500/20">
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <div className="flex items-center gap-3 cursor-pointer group" onClick={onHome}>
-        <div className="w-8 h-8 rounded bg-gold-500 flex items-center justify-center shadow-[0_0_10px_#FFD700] group-hover:shadow-[0_0_20px_#FFD700] transition-shadow">
-          <Cpu className="w-5 h-5 text-dark-900" />
-        </div>
-        <span className="font-black text-xl tracking-widest glow-text">DCAI<span className="text-cyan-400 glow-text-cyan">L3</span></span>
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1 ml-4 rounded-full border border-cyan-500/30 bg-cyan-500/10">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
-          </span>
-          <span className="text-[10px] font-mono font-bold tracking-widest text-cyan-400">MAINNET</span>
-        </div>
-      </div>
-      
-      <nav className="hidden md:flex items-center gap-8">
-        {['BLOCKS', 'TRANSACTIONS', 'TOKENS', 'NODES', 'API'].map(item => (
-          <a key={item} href="#" className="text-sm font-mono text-gold-500/70 hover:text-cyan-400 hover:glow-text-cyan transition-all">
-            {item}
-          </a>
-        ))}
-      </nav>
+const Header = ({
+  active,
+  onHome,
+  onBlocks,
+}: {
+  active: 'home' | 'blocks' | 'tx' | 'block' | 'address',
+  onHome: () => void,
+  onBlocks: () => void,
+}) => {
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-      <div className="flex items-center gap-4">
-        <button className="glow-box px-4 py-1.5 rounded text-xs font-mono font-bold hover:bg-cyan-500 hover:text-dark-900 hover:shadow-[0_0_15px_#00F0FF] transition-all border-cyan-500/50 text-cyan-400">
-          CONNECT WALLET
-        </button>
+  const NavItem = ({ label, isActive, onClick }: { label: string, isActive?: boolean, onClick?: () => void }) => (
+    <button
+      onClick={onClick}
+      className={`text-sm font-mono transition-all ${isActive ? 'text-cyan-300 glow-text-cyan' : 'text-gold-500/70 hover:text-cyan-400 hover:glow-text-cyan'}`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <header className="sticky top-0 z-40 bg-dark-900/80 backdrop-blur-md border-b border-gold-500/20">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="flex items-center gap-3 cursor-pointer group" onClick={() => { setMobileOpen(false); onHome(); }}>
+          <div className="w-8 h-8 rounded bg-gold-500 flex items-center justify-center shadow-[0_0_10px_#FFD700] group-hover:shadow-[0_0_20px_#FFD700] transition-shadow">
+            <Cpu className="w-5 h-5 text-dark-900" />
+          </div>
+          <span className="font-black text-xl tracking-widest glow-text">DCAI<span className="text-cyan-400 glow-text-cyan">L3</span></span>
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1 ml-4 rounded-full border border-cyan-500/30 bg-cyan-500/10">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+            </span>
+            <span className="text-[10px] font-mono font-bold tracking-widest text-cyan-400">MAINNET</span>
+          </div>
+        </div>
+
+        <nav className="hidden md:flex items-center gap-8">
+          <NavItem label="BLOCKS" isActive={active === 'blocks' || active === 'block'} onClick={() => { setMobileOpen(false); onBlocks(); }} />
+          <NavItem label="TRANSACTIONS" onClick={() => { /* next */ }} />
+          <NavItem label="TOKENS" onClick={() => { /* next */ }} />
+          <NavItem label="NODES" onClick={() => { /* next */ }} />
+          <NavItem label="API" onClick={() => { /* next */ }} />
+        </nav>
+
+        <div className="flex items-center gap-3">
+          <button className="hidden sm:inline-flex glow-box px-4 py-1.5 rounded text-xs font-mono font-bold hover:bg-cyan-500 hover:text-dark-900 hover:shadow-[0_0_15px_#00F0FF] transition-all border-cyan-500/50 text-cyan-400">
+            CONNECT WALLET
+          </button>
+
+          <button
+            onClick={() => setMobileOpen(v => !v)}
+            className="md:hidden w-10 h-10 inline-flex items-center justify-center rounded-lg border border-cyan-500/20 text-cyan-300 hover:border-cyan-400/50"
+            aria-label="Menu"
+          >
+            {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </div>
-    </div>
-  </header>
-);
+
+      <AnimatePresence>
+        {mobileOpen ? (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.16 }}
+            className="md:hidden border-t border-gold-500/10 bg-dark-900/95 backdrop-blur-md"
+          >
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col gap-3">
+              <NavItem label="BLOCKS" isActive={active === 'blocks' || active === 'block'} onClick={() => { setMobileOpen(false); onBlocks(); }} />
+              <NavItem label="TRANSACTIONS" onClick={() => { setMobileOpen(false); }} />
+              <NavItem label="TOKENS" onClick={() => { setMobileOpen(false); }} />
+              <NavItem label="NODES" onClick={() => { setMobileOpen(false); }} />
+              <NavItem label="API" onClick={() => { setMobileOpen(false); }} />
+              <button className="mt-2 glow-box px-4 py-2 rounded text-xs font-mono font-bold border-cyan-500/50 text-cyan-300 hover:bg-cyan-500 hover:text-dark-900 transition-all">
+                CONNECT WALLET
+              </button>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </header>
+  );
+};
 
 const Hero = () => (
   <div className="py-20 flex flex-col items-center justify-center text-center relative">
@@ -332,6 +384,84 @@ const DetailRow = ({ label, value, isCyan = false, onCopy }: { label: string, va
     </div>
   </div>
 );
+
+const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) => {
+  const [items, setItems] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const short = (s: string, a = 10, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch('/api/v2/blocks?type=block&limit=25', { cache: 'no-store' });
+        if (res.status === 429) return;
+        const j = await res.json();
+        if (!cancelled) setItems(j?.items || []);
+      } catch {}
+      finally { if (!cancelled) setLoading(false); }
+    };
+    load();
+    const id = window.setInterval(load, 8000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
+    >
+      <div className="mb-6 flex items-center gap-4">
+        <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/20 shadow-[0_0_20px_rgba(0,240,255,0.10)]">
+          <List className="w-8 h-8 text-cyan-400" />
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-3xl md:text-4xl font-black tracking-widest">BLOCKS <span className="glow-text-cyan text-cyan-400">LIST</span></h1>
+          <div className="mt-2 text-xs font-mono text-gold-500/60">{loading ? 'Loading…' : (items ? `${items.length} block(s)` : '—')}</div>
+        </div>
+      </div>
+
+      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
+        <div className="space-y-3">
+          {(items || []).map((b: any) => (
+            <motion.div
+              key={b.hash}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.16 }}
+              className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <button
+                    onClick={() => onViewBlock(Number(b.height))}
+                    className="text-left text-sm font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                  >
+                    Block #{b.height}
+                  </button>
+                  <div className="mt-1 text-[11px] font-mono text-gold-500/60 break-all">{short(String(b.hash || ''))}</div>
+                  <div className="mt-1 text-[10px] font-mono text-gold-500/40">miner {short(String(b.miner?.hash || '0x0'))} · tx {b.transaction_count ?? '--'} · size {b.size ?? '--'} bytes</div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-[11px] font-mono text-gold-500/60">{String(b.timestamp || '').replace('T', ' ').replace('Z', '')}</div>
+                  <div className="mt-2 text-[10px] font-mono text-gold-500/40">gas used {b.gas_used ?? '--'} / {b.gas_limit ?? '--'}</div>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+
+          {!loading && items && items.length === 0 ? (
+            <div className="text-xs font-mono text-gold-500/60">No blocks.</div>
+          ) : null}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
 
 const BlockView = ({ block, onBack }: { block: any, onBack: () => void, key?: string }) => {
   const [details, setDetails] = useState<any>(null);
@@ -1434,7 +1564,7 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress }: { address: st
 };
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'block' | 'tx' | 'address'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'blocks' | 'block' | 'tx' | 'address'>('home');
   const [selectedBlock, setSelectedBlock] = useState<any>(null);
   const [selectedTxHash, setSelectedTxHash] = useState<string | null>(null);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
@@ -1444,6 +1574,12 @@ export default function App() {
     const applyRouteFromPath = () => {
       try {
         const path = window.location.pathname || '/';
+
+        if (path === '/blocks' || path === '/blocks/') {
+          setCurrentView('blocks');
+          return;
+        }
+
         const txm = path.match(/^\/tx\/(0x[0-9a-fA-F]{64})/);
         if (txm) {
           setSelectedTxHash(txm[1]);
@@ -1729,7 +1865,11 @@ export default function App() {
       <div className="scanline" />
       <div className="perspective-grid" />
       
-      <Header onHome={() => { setCurrentView('home'); try { window.history.pushState({ view: 'home' }, '', '/'); } catch {} }} />
+      <Header
+        active={currentView}
+        onHome={() => { setCurrentView('home'); try { window.history.pushState({ view: 'home' }, '', '/'); } catch {} }}
+        onBlocks={() => { setCurrentView('blocks'); try { window.history.pushState({ view: 'blocks' }, '', '/blocks'); } catch {} }}
+      />
       
       <AnimatePresence mode="wait">
         {currentView === 'home' ? (
@@ -1968,6 +2108,11 @@ export default function App() {
               </div>
             </div>
           </motion.main>
+        ) : currentView === 'blocks' ? (
+          <BlocksListView
+            key="blocks"
+            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
+          />
         ) : currentView === 'tx' ? (
           <TxView
             key="tx"
