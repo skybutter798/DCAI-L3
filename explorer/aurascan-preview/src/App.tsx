@@ -593,7 +593,20 @@ const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => voi
 
   const methodLabel = (tx: any) => {
     try {
+      // Prefer Blockscout decoded input (when contract is verified)
+      const di = tx?.decoded_input;
+      if (di) {
+        const mc = (di as any)?.method_call || (di as any)?.method;
+        if (mc && String(mc).trim()) return String(mc).trim();
+        const mid = (di as any)?.method_id;
+        if (mid && String(mid).trim()) return String(mid).trim();
+      }
+
+      // Some Blockscout instances also surface a top-level `method`
+      if (tx?.method && String(tx.method).trim()) return String(tx.method).trim();
+
       if (tx?.created_contract?.hash) return 'CONTRACT CREATE';
+
       const ri = String(tx?.raw_input || '');
       if (!ri || ri === '0x' || ri.length < 10) return 'TRANSFER';
       return ri.slice(0, 10);
@@ -730,7 +743,7 @@ const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => voi
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-mono tracking-widest px-2 py-0.5 rounded border border-cyan-500/20 bg-cyan-500/10 text-cyan-300">
+                    <span className="text-[10px] font-mono tracking-widest px-2 py-0.5 rounded border border-cyan-500/20 bg-cyan-500/10 text-cyan-300 max-w-[180px] truncate">
                       {methodLabel(tx)}
                     </span>
                     <button
