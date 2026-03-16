@@ -88,10 +88,12 @@ const Header = ({
   active,
   onHome,
   onBlocks,
+  onTxs,
 }: {
-  active: 'home' | 'blocks' | 'tx' | 'block' | 'address',
+  active: 'home' | 'blocks' | 'txs' | 'tx' | 'block' | 'address',
   onHome: () => void,
   onBlocks: () => void,
+  onTxs: () => void,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -123,7 +125,7 @@ const Header = ({
 
         <nav className="hidden md:flex items-center gap-8">
           <NavItem label="BLOCKS" isActive={active === 'blocks' || active === 'block'} onClick={() => { setMobileOpen(false); onBlocks(); }} />
-          <NavItem label="TRANSACTIONS" onClick={() => { /* next */ }} />
+          <NavItem label="TRANSACTIONS" isActive={active === 'txs' || active === 'tx'} onClick={() => { setMobileOpen(false); onTxs(); }} />
           <NavItem label="TOKENS" onClick={() => { /* next */ }} />
           <NavItem label="NODES" onClick={() => { /* next */ }} />
           <NavItem label="API" onClick={() => { /* next */ }} />
@@ -155,7 +157,7 @@ const Header = ({
           >
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col gap-3">
               <NavItem label="BLOCKS" isActive={active === 'blocks' || active === 'block'} onClick={() => { setMobileOpen(false); onBlocks(); }} />
-              <NavItem label="TRANSACTIONS" onClick={() => { setMobileOpen(false); }} />
+              <NavItem label="TRANSACTIONS" isActive={active === 'txs' || active === 'tx'} onClick={() => { setMobileOpen(false); onTxs(); }} />
               <NavItem label="TOKENS" onClick={() => { setMobileOpen(false); }} />
               <NavItem label="NODES" onClick={() => { setMobileOpen(false); }} />
               <NavItem label="API" onClick={() => { setMobileOpen(false); }} />
@@ -389,11 +391,34 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [pageParams, setPageParams] = useState<any | null>(null);
+  const [pageParams, setPageParams] = useState<any | null>(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search || '');
+      const o: any = {};
+      for (const k of ['block_number', 'items_count', 'limit']) {
+        const v = sp.get(k);
+        if (v != null) o[k] = v;
+      }
+      return Object.keys(o).length ? o : null;
+    } catch {
+      return null;
+    }
+  });
   const [nextParams, setNextParams] = useState<any | null>(null);
   const [prevStack, setPrevStack] = useState<any[]>([]);
 
   const short = (s: string, a = 10, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
+
+  const setBlocksUrl = (p: any | null, replace = false) => {
+    try {
+      const sp = new URLSearchParams();
+      if (p) for (const [k, v] of Object.entries(p)) if (v != null) sp.set(String(k), String(v));
+      const qs = sp.toString();
+      const url = '/blocks' + (qs ? `?${qs}` : '');
+      const fn: any = replace ? window.history.replaceState : window.history.pushState;
+      fn.call(window.history, { view: 'blocks' }, '', url);
+    } catch {}
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -463,6 +488,7 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
               const copy = prevStack.slice();
               const prev = copy.pop();
               setPrevStack(copy);
+              setBlocksUrl(prev || null);
               setPageParams(prev || null);
             }}
             className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${prevStack.length ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
@@ -475,6 +501,7 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
             onClick={() => {
               if (!nextParams) return;
               setPrevStack(s => [...s, pageParams]);
+              setBlocksUrl(nextParams);
               setPageParams(nextParams);
             }}
             className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${nextParams ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
@@ -515,6 +542,167 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
 
           {!loading && items && items.length === 0 ? (
             <div className="text-xs font-mono text-gold-500/60">No blocks.</div>
+          ) : null}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+const TxsListView = ({ onViewTx }: { onViewTx: (h: string) => void }) => {
+  const [items, setItems] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const [pageParams, setPageParams] = useState<any | null>(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search || '');
+      const o: any = {};
+      for (const k of ['block_number', 'index', 'items_count', 'limit']) {
+        const v = sp.get(k);
+        if (v != null) o[k] = v;
+      }
+      return Object.keys(o).length ? o : null;
+    } catch {
+      return null;
+    }
+  });
+  const [nextParams, setNextParams] = useState<any | null>(null);
+  const [prevStack, setPrevStack] = useState<any[]>([]);
+
+  const short = (s: string, a = 12, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
+
+  const setTxsUrl = (p: any | null, replace = false) => {
+    try {
+      const sp = new URLSearchParams();
+      if (p) for (const [k, v] of Object.entries(p)) if (v != null) sp.set(String(k), String(v));
+      const qs = sp.toString();
+      const url = '/txs' + (qs ? `?${qs}` : '');
+      const fn: any = replace ? window.history.replaceState : window.history.pushState;
+      fn.call(window.history, { view: 'txs' }, '', url);
+    } catch {}
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const buildUrl = () => {
+      const sp = new URLSearchParams();
+      sp.set('limit', '25');
+      if (pageParams) {
+        for (const [k, v] of Object.entries(pageParams)) {
+          if (v == null) continue;
+          sp.set(String(k), String(v));
+        }
+      }
+      return `/api/v2/transactions?${sp.toString()}`;
+    };
+
+    const load = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(buildUrl(), { cache: 'no-store' });
+        if (res.status === 429) return;
+        const j = await res.json();
+        if (!cancelled) {
+          setItems(j?.items || []);
+          setNextParams(j?.next_page_params || null);
+        }
+      } catch {}
+      finally { if (!cancelled) setLoading(false); }
+    };
+
+    load();
+
+    if (!pageParams) {
+      const id = window.setInterval(load, 6000);
+      return () => { cancelled = true; window.clearInterval(id); };
+    }
+    return () => { cancelled = true; };
+  }, [pageParams]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
+    >
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="p-4 bg-gold-500/10 rounded-xl border border-gold-500/20 shadow-[0_0_20px_rgba(255,215,0,0.10)]">
+            <ArrowRightLeft className="w-8 h-8 text-gold-400" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-3xl md:text-4xl font-black tracking-widest">TRANSACTIONS <span className="glow-text text-gold-500">LIST</span></h1>
+            <div className="mt-2 text-xs font-mono text-gold-500/60">{loading ? 'Loading…' : (items ? `${items.length} tx(s)` : '—')}</div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            disabled={prevStack.length === 0}
+            onClick={() => {
+              if (!prevStack.length) return;
+              const copy = prevStack.slice();
+              const prev = copy.pop();
+              setPrevStack(copy);
+              setTxsUrl(prev || null);
+              setPageParams(prev || null);
+            }}
+            className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${prevStack.length ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
+          >
+            PREV
+          </button>
+          <button
+            disabled={!nextParams}
+            onClick={() => {
+              if (!nextParams) return;
+              setPrevStack(s => [...s, pageParams]);
+              setTxsUrl(nextParams);
+              setPageParams(nextParams);
+            }}
+            className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${nextParams ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
+          >
+            NEXT
+          </button>
+        </div>
+      </div>
+
+      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
+        <div className="space-y-3">
+          {(items || []).map((tx: any) => (
+            <motion.div
+              key={tx.hash}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.16 }}
+              className="rounded-xl border border-gold-500/15 bg-dark-900/40 p-4"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <button
+                    onClick={() => onViewTx(String(tx.hash))}
+                    className="text-left text-sm font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60 break-all"
+                  >
+                    {String(tx.hash)}
+                  </button>
+                  <div className="mt-1 text-[10px] font-mono text-gold-500/45">
+                    block {tx.block ?? '--'} · pos {tx.position ?? '--'} · status {String(tx.status ?? tx.result ?? '--')}
+                  </div>
+                  <div className="mt-2 text-[10px] font-mono text-gold-500/40">
+                    from {short(String(tx.from?.hash || ''))} → to {short(String(tx.to?.hash || tx.created_contract?.hash || ''))}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-xs font-mono text-gold-500/85">{String(tx.value ?? '0')} wei</div>
+                  <div className="mt-1 text-[10px] font-mono text-gold-500/40">conf {tx.confirmations ?? '--'}</div>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+
+          {!loading && items && items.length === 0 ? (
+            <div className="text-xs font-mono text-gold-500/60">No transactions.</div>
           ) : null}
         </div>
       </div>
@@ -1623,7 +1811,7 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress }: { address: st
 };
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'blocks' | 'block' | 'tx' | 'address'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'blocks' | 'txs' | 'block' | 'tx' | 'address'>('home');
   const [selectedBlock, setSelectedBlock] = useState<any>(null);
   const [selectedTxHash, setSelectedTxHash] = useState<string | null>(null);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
@@ -1636,6 +1824,11 @@ export default function App() {
 
         if (path === '/blocks' || path === '/blocks/') {
           setCurrentView('blocks');
+          return;
+        }
+
+        if (path === '/txs' || path === '/txs/') {
+          setCurrentView('txs');
           return;
         }
 
@@ -1928,6 +2121,7 @@ export default function App() {
         active={currentView}
         onHome={() => { setCurrentView('home'); try { window.history.pushState({ view: 'home' }, '', '/'); } catch {} }}
         onBlocks={() => { setCurrentView('blocks'); try { window.history.pushState({ view: 'blocks' }, '', '/blocks'); } catch {} }}
+        onTxs={() => { setCurrentView('txs'); try { window.history.pushState({ view: 'txs' }, '', '/txs'); } catch {} }}
       />
       
       <AnimatePresence mode="wait">
@@ -2171,6 +2365,11 @@ export default function App() {
           <BlocksListView
             key="blocks"
             onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
+          />
+        ) : currentView === 'txs' ? (
+          <TxsListView
+            key="txs"
+            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
           />
         ) : currentView === 'tx' ? (
           <TxView
