@@ -79,7 +79,19 @@ async function main() {
   const { abi, bytecode } = compile(contractPath);
 
   const factory = new ethers.ContractFactory(abi, bytecode, wallet);
-  const contract = await factory.deploy(NAME, SYMBOL, DECIMALS, recipient, initialSupply);
+
+  // Some RPC nodes can fail eth_estimateGas for contract creation; allow manual overrides.
+  const gasLimit = BigInt(getEnv('GAS_LIMIT', '5000000'));
+  const maxFeePerGas = process.env.MAX_FEE_PER_GAS ? BigInt(process.env.MAX_FEE_PER_GAS) : undefined;
+  const maxPriorityFeePerGas = process.env.MAX_PRIORITY_FEE_PER_GAS ? BigInt(process.env.MAX_PRIORITY_FEE_PER_GAS) : undefined;
+
+  const overrides = {
+    gasLimit,
+    ...(maxFeePerGas != null ? { maxFeePerGas } : {}),
+    ...(maxPriorityFeePerGas != null ? { maxPriorityFeePerGas } : {}),
+  };
+
+  const contract = await factory.deploy(NAME, SYMBOL, DECIMALS, recipient, initialSupply, overrides);
   console.log('DEPLOY_TX:', contract.deploymentTransaction()?.hash);
 
   const deployed = await contract.waitForDeployment();
