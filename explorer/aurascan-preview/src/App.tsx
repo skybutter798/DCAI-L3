@@ -584,6 +584,13 @@ const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => voi
     }
   };
 
+  const fmtTDCAIParts = (weiLike: any, dp = 6) => {
+    const s = fmtTDCAI(weiLike, dp);
+    if (s === '--') return { i: '--', f: ''.padEnd(dp, '-') };
+    const [i, f0] = String(s).split('.');
+    return { i: i || '0', f: (f0 || '').padEnd(dp, '0').slice(0, dp) };
+  };
+
   const methodLabel = (tx: any) => {
     try {
       if (tx?.created_contract?.hash) return 'CONTRACT CREATE';
@@ -764,13 +771,34 @@ const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => voi
                   <div className="text-[10px] font-mono text-gold-500/60">{timeAgo(String(tx.timestamp || ''))}</div>
                   <div className="text-[10px] font-mono text-gold-500/35">{String(tx.timestamp || '').replace('T', ' ').replace('Z', '')}</div>
 
-                  <div className="mt-2 text-xs font-mono text-gold-500/90">
-                    {fmtTDCAI(tx.value)} <span className="text-gold-500/60">tDCAI</span>
+                  <div className="mt-2 text-xs font-mono text-gold-500/90 tabular-nums">
+                    {(() => {
+                      const p = fmtTDCAIParts(tx.value, 6);
+                      return (
+                        <span>
+                          <span className="inline-block text-right w-[72px]">{p.i}</span>
+                          <span className="text-gold-500/60">.</span>
+                          <span className="inline-block w-[52px]">{p.f}</span>
+                          <span className="ml-1 text-gold-500/60">tDCAI</span>
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="text-[10px] font-mono text-gold-500/35">{String(tx.value ?? '0')} wei</div>
 
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/70">
-                    fee {fmtTDCAI(tx.fee?.value ?? tx.fee ?? '0')} <span className="text-gold-500/50">tDCAI</span>
+                  <div className="mt-2 text-[10px] font-mono text-gold-500/70 tabular-nums">
+                    {(() => {
+                      const p = fmtTDCAIParts(tx.fee?.value ?? tx.fee ?? '0', 6);
+                      return (
+                        <span>
+                          <span className="text-gold-500/50">fee</span>{' '}
+                          <span className="inline-block text-right w-[72px]">{p.i}</span>
+                          <span className="text-gold-500/50">.</span>
+                          <span className="inline-block w-[52px]">{p.f}</span>
+                          <span className="ml-1 text-gold-500/50">tDCAI</span>
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="text-[10px] font-mono text-gold-500/35">{String(tx.fee?.value ?? tx.fee ?? '0')} wei</div>
                 </div>
