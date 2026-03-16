@@ -77,7 +77,7 @@ const CursorFollower = () => {
 
   return (
     <motion.div
-      className="fixed top-0 left-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-[100px] pointer-events-none z-50"
+      className="fixed top-0 left-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-[100px] pointer-events-none z-0"
       animate={{ x: pos.x - 192, y: pos.y - 192 }}
       transition={{ type: 'tween', ease: 'backOut', duration: 0.5 }}
     />
@@ -107,7 +107,7 @@ const Header = ({
   );
 
   return (
-    <header className="sticky top-0 z-40 bg-dark-900/80 backdrop-blur-md border-b border-gold-500/20">
+    <header className="sticky top-0 z-[100] bg-dark-900/80 backdrop-blur-md border-b border-gold-500/20 pointer-events-auto">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3 cursor-pointer group" onClick={() => { setMobileOpen(false); onHome(); }}>
           <div className="w-8 h-8 rounded bg-gold-500 flex items-center justify-center shadow-[0_0_10px_#FFD700] group-hover:shadow-[0_0_20px_#FFD700] transition-shadow">
