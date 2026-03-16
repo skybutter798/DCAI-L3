@@ -850,7 +850,7 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
   );
 };
 
-const BlockView = ({ block, onBack }: { block: any, onBack: () => void, key?: string }) => {
+const BlockView = ({ block, onBack, onViewTx, onViewAddress }: { block: any, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void, key?: string }) => {
   const [details, setDetails] = useState<any>(null);
   const [blockTxs, setBlockTxs] = useState<any[]>([]);
   const [copyToast, setCopyToast] = useState<string | null>(null);
@@ -1032,12 +1032,23 @@ const BlockView = ({ block, onBack }: { block: any, onBack: () => void, key?: st
             <span className="text-xs font-mono text-gold-500/50">VALIDATOR</span>
             <div className="flex items-start justify-between gap-3">
               <button
-                onClick={() => details.validator && navigateTo(`/address/${details.validator}`)}
+                onClick={() => {
+                  const v = details?.validator || details?.miner?.hash || details?.miner;
+                  if (v) onViewAddress(String(v));
+                }}
                 className="text-left text-sm font-mono break-all text-cyan-400 glow-text-cyan hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
               >
-                {details.validator || details.miner}
+                {details?.validator || details?.miner?.hash || details?.miner}
               </button>
-              <button onClick={() => details.validator && copyToClipboard(String(details.validator))} className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded">⧉</button>
+              <button
+                onClick={() => {
+                  const v = details?.validator || details?.miner?.hash || details?.miner;
+                  if (v) copyToClipboard(String(v));
+                }}
+                className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded"
+              >
+                ⧉
+              </button>
             </div>
           </div>
           <DetailRow label="BLOCK REWARD" value={`${details.reward} DCAI`} />
@@ -1072,14 +1083,22 @@ const BlockView = ({ block, onBack }: { block: any, onBack: () => void, key?: st
                   <Hash className="w-4 h-4 text-gold-500 group-hover:text-cyan-400 transition-colors" />
                 </div>
                 <div>
-                  <div className="text-[11px] font-mono text-cyan-400 break-all w-44 sm:w-72 leading-4">{tx.hash}</div>
+                  <button
+                    onClick={() => onViewTx(String(tx.hash))}
+                    className="text-left text-[11px] font-mono text-cyan-400 break-all w-44 sm:w-72 leading-4 hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                  >
+                    {tx.hash}
+                  </button>
                   <div className="text-[10px] font-mono text-gold-500/50">{tx.time}{tx.timestamp ? (' · ' + timeAgo(tx.timestamp)) : ""}</div>
                 </div>
               </div>
 
               <div className="flex items-center gap-2 flex-1 px-3">
                 <div className="flex items-center gap-2 w-28">
-  <button onClick={() => navigateTo(`/address/${tx.from}`)} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate cursor-pointer underline decoration-gold-500/20 hover:decoration-cyan-400/60">{tx.from}</button>
+  <button onClick={() => {
+    const a = (tx as any)?.from?.hash || (tx as any)?.from;
+    if (a) onViewAddress(String(a));
+  }} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate cursor-pointer underline decoration-gold-500/20 hover:decoration-cyan-400/60">{String((tx as any)?.from?.hash || (tx as any)?.from || '--')}</button>
   <button onClick={async () => {
     const ok = await copyToClipboard(tx.from);
     if (ok) {
@@ -1092,7 +1111,10 @@ const BlockView = ({ block, onBack }: { block: any, onBack: () => void, key?: st
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-cyan-400 rounded-full blur-[1px] shadow-[0_0_8px_#00F0FF]" />
                 </div>
                 <div className="flex items-center gap-2 w-28 justify-end">
-  <button onClick={() => navigateTo(`/address/${tx.to}`)} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate cursor-pointer underline decoration-gold-500/20 hover:decoration-cyan-400/60">{tx.to}</button>
+  <button onClick={() => {
+    const a = (tx as any)?.to?.hash || (tx as any)?.to;
+    if (a) onViewAddress(String(a));
+  }} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate cursor-pointer underline decoration-gold-500/20 hover:decoration-cyan-400/60">{String((tx as any)?.to?.hash || (tx as any)?.to || '--')}</button>
   <button onClick={async () => {
     const ok = await copyToClipboard(tx.to);
     if (ok) {
@@ -2594,6 +2616,8 @@ export default function App() {
             key="block" 
             block={selectedBlock} 
             onBack={() => setCurrentView('home')} 
+            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
+            onViewAddress={(a: string) => handleViewAddress(a)}
           />
         )}
       </AnimatePresence>
