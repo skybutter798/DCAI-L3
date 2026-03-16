@@ -1064,7 +1064,8 @@ const BlockView = ({ block, onBack, onViewTx, onViewAddress }: { block: any, onB
           size: b.size != null ? String(b.size) : '--',
           txCount: Number(b.transaction_count ?? 0),
           time: b.timestamp ? new Date(b.timestamp).toLocaleString('en-GB', { hour12: false }) : '--',
-          miner: signer ? (short(signer) + '  ' + signer) : '--',
+          validator: signer || '',
+          miner: signer ? short(signer) : '--',
           reward: fmt(b.transaction_fees ?? '0', 18, 6),
           gasUsed: Number(b.gas_used ?? 0),
           gasLimit: Number(b.gas_limit ?? 0),
@@ -1159,24 +1160,33 @@ const BlockView = ({ block, onBack, onViewTx, onViewAddress }: { block: any, onB
           <div className="flex flex-col gap-1 border-b border-gold-500/10 pb-4">
             <span className="text-xs font-mono text-gold-500/50">VALIDATOR</span>
             <div className="flex items-start justify-between gap-3">
-              <button
-                onClick={() => {
-                  const v = details?.validator || details?.miner?.hash || details?.miner;
-                  if (v) onViewAddress(String(v));
-                }}
-                className="text-left text-sm font-mono break-all text-cyan-400 glow-text-cyan hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-              >
-                {details?.validator || details?.miner?.hash || details?.miner}
-              </button>
-              <button
-                onClick={() => {
-                  const v = details?.validator || details?.miner?.hash || details?.miner;
-                  if (v) copyToClipboard(String(v));
-                }}
-                className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded"
-              >
-                ⧉
-              </button>
+              {details?.validator ? (
+                <div className="min-w-0">
+                  <button
+                    onClick={() => onViewAddress(String(details.validator))}
+                    className="text-left text-sm font-mono text-cyan-400 glow-text-cyan hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                  >
+                    {details?.miner || String(details.validator).slice(0, 6) + '…' + String(details.validator).slice(-4)}
+                  </button>
+                  <button
+                    onClick={() => onViewAddress(String(details.validator))}
+                    className="mt-1 block text-left text-[10px] font-mono text-gold-500/50 hover:text-cyan-300 underline decoration-gold-500/10 hover:decoration-cyan-400/60 break-all"
+                  >
+                    {String(details.validator)}
+                  </button>
+                </div>
+              ) : (
+                <div className="text-sm font-mono text-gold-400">--</div>
+              )}
+
+              {details?.validator ? (
+                <button
+                  onClick={() => copyToClipboard(String(details.validator))}
+                  className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded"
+                >
+                  ⧉
+                </button>
+              ) : null}
             </div>
           </div>
           <DetailRow label="BLOCK REWARD" value={`${details.reward} DCAI`} />
@@ -1477,7 +1487,21 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
             <DetailRow label="HASH" value={tx?.hash || hash} isCyan />
             <DetailRow label="RESULT" value={tx?.result || '--'} />
-            <DetailRow label="BLOCK" value={(tx?.block_number ?? tx?.block) != null ? `#${tx.block_number ?? tx.block}` : '--'} isCyan />
+            <div className="flex flex-col gap-1 border-b border-gold-500/10 pb-4">
+              <span className="text-xs font-mono text-gold-500/50">BLOCK</span>
+              <div className="flex items-start justify-between gap-3">
+                {(tx?.block_number ?? tx?.block) != null ? (
+                  <button
+                    onClick={() => onViewBlock(Number(tx?.block_number ?? tx?.block))}
+                    className="text-left text-sm font-mono break-all text-cyan-400 glow-text-cyan hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                  >
+                    #{String(tx?.block_number ?? tx?.block)}
+                  </button>
+                ) : (
+                  <div className="text-sm font-mono break-all text-gold-400">--</div>
+                )}
+              </div>
+            </div>
             <DetailRow label="POSITION" value={tx?.position ?? '--'} />
             <div className="flex flex-col gap-2 border-b border-gold-500/10 pb-4">
               <span className="text-xs font-mono text-gold-500/50">FROM</span>
