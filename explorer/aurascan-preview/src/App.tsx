@@ -2860,6 +2860,7 @@ const DashboardView = () => {
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [tier, setTier] = useState<'basic' | 'pro' | 'ultra'>('basic');
+  const [docsTab, setDocsTab] = useState<'dapp' | 'ops'>('dapp');
   const [lastReq, setLastReq] = useState<any>(null);
   const [revealedKeys, setRevealedKeys] = useState<any[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -3086,9 +3087,26 @@ const DashboardView = () => {
       </div>
 
       <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-        <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
-          <Code2 className="w-5 h-5" /> ENDPOINTS
-        </h2>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
+            <Code2 className="w-5 h-5" /> ENDPOINTS
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setDocsTab('dapp')}
+              className={`px-3 py-1.5 rounded-lg border text-[10px] font-mono ${docsTab === 'dapp' ? 'border-cyan-400/60 text-cyan-200 bg-cyan-500/10' : 'border-gold-500/15 text-gold-500/60 hover:border-cyan-500/30 hover:text-cyan-300'}`}
+            >
+              DAPP (ethers/viem)
+            </button>
+            <button
+              onClick={() => setDocsTab('ops')}
+              className={`px-3 py-1.5 rounded-lg border text-[10px] font-mono ${docsTab === 'ops' ? 'border-cyan-400/60 text-cyan-200 bg-cyan-500/10' : 'border-gold-500/15 text-gold-500/60 hover:border-cyan-500/30 hover:text-cyan-300'}`}
+            >
+              OPS (curl/cast/web3.py)
+            </button>
+          </div>
+        </div>
+        <div className="mt-2 text-[10px] font-mono text-gold-500/50">chainId <span className="text-cyan-300">18441</span> · native <span className="text-cyan-300">tDCAI</span></div>
 
         {revealedKeys && revealedKeys.length ? (
           <div className="mt-4 space-y-3">
@@ -3102,6 +3120,15 @@ const DashboardView = () => {
                   <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.http}</div>
                   <div className="mt-2 text-[11px] font-mono text-gold-500/60">WS</div>
                   <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.ws}</div>
+
+                  <div className="mt-4 rounded-xl border border-gold-500/10 bg-dark-950/30 p-3">
+                    <div className="text-[10px] font-mono text-gold-500/50">Quickstart ({docsTab})</div>
+                    <pre className="mt-2 text-[10px] font-mono text-gold-500/70 whitespace-pre-wrap break-all">
+{docsTab === 'dapp'
+? `// ethers v6\nimport { ethers } from \"ethers\";\n\nconst provider = new ethers.JsonRpcProvider(\"${e.http}\", 18441);\nconsole.log(await provider.getBlockNumber());\n\n// viem\nimport { createPublicClient, http } from \"viem\";\n\nconst client = createPublicClient({\n  chain: { id: 18441, name: \"DCAI L3\", nativeCurrency: { name: \"tDCAI\", symbol: \"tDCAI\", decimals: 18 }, rpcUrls: { default: { http: [\"${e.http}\"] } } },\n  transport: http(\"${e.http}\"),\n});\nconsole.log(await client.getBlockNumber());`
+: `# curl (eth_chainId)\ncurl -s \"${e.http}\" \\\n  -H 'content-type: application/json' \\\n  --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}'\n\n# Foundry cast\ncast chain-id --rpc-url \"${e.http}\"\ncast block-number --rpc-url \"${e.http}\"\n\n# web3.py\nfrom web3 import Web3\nw3 = Web3(Web3.HTTPProvider(\"${e.http}\"))\nprint(w3.eth.chain_id)\nprint(w3.eth.block_number)`}
+                    </pre>
+                  </div>
                 </div>
               );
             })}
