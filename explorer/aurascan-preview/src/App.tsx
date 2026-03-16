@@ -2128,9 +2128,8 @@ export default function App() {
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const blockHeightRef = useRef(29402934);
 
-  // INCOMING block countdown + new-block animation helpers
+  // INCOMING block timing helpers
   const [avgBlockMs, setAvgBlockMs] = useState<number>(2000);
-  const [incomingMs, setIncomingMs] = useState<number>(2000);
   const latestHeightRef = useRef<number | null>(null);
   const lastNewBlockAtRef = useRef<number>(Date.now());
 
@@ -2151,15 +2150,7 @@ export default function App() {
     }
   };
 
-  // Update the incoming-block countdown in real time
-  useEffect(() => {
-    const id = setInterval(() => {
-      const elapsed = Date.now() - lastNewBlockAtRef.current;
-      const ms = Math.max(0, avgBlockMs - (elapsed % avgBlockMs));
-      setIncomingMs(ms);
-    }, 100);
-    return () => clearInterval(id);
-  }, [avgBlockMs]);
+  // (Removed 100ms countdown state updates; it caused constant re-renders and could make the desktop header feel unclickable.)
 
   useEffect(() => {
     let cancelled = false;

@@ -32,6 +32,7 @@ body {
   transform: perspective(1000px) rotateX(75deg);
   transform-origin: top;
   z-index: -1;
+  pointer-events: none;
   animation: grid-move 3s linear infinite;
   mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
 }
