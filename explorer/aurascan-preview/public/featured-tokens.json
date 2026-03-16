@@ -1,5 +1,12 @@
 {
   "featured": [
-    
+    {
+      "address": "0xF7C968d5e0903aCc257D63913F886241fE292AAF",
+      "symbol": "SB01",
+      "name": "SBtoken",
+      "type": "erc20",
+      "decimals": 18,
+      "note": "Official featured"
+    }
   ]
 }
