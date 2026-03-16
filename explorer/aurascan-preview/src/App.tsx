@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
-import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info } from 'lucide-react';
+import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2 } from 'lucide-react';
 
 function navigateTo(path: string) {
   try {
@@ -1104,12 +1104,15 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
 };
 
 
-const AddressView = ({ address, onBack, onViewTx }: { address: string, onBack: () => void, onViewTx: (h: string) => void }) => {
+const AddressView = ({ address, onBack, onViewTx, onViewAddress }: { address: string, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void }) => {
   const [info, setInfo] = useState<any>(null);
-  const [tab, setTab] = useState<'overview' | 'txs' | 'tokens'>('overview');
+  const [tab, setTab] = useState<'overview' | 'contract' | 'txs' | 'tokens'>('overview');
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [addrTxs, setAddrTxs] = useState<any[] | null>(null);
   const [addrTxsLoading, setAddrTxsLoading] = useState<boolean>(false);
+
+  const [contract, setContract] = useState<any>(null);
+  const [contractLoading, setContractLoading] = useState<boolean>(false);
 
   const fmtTDCAI = (weiLike: any, dp = 6) => {
     try {
@@ -1123,6 +1126,13 @@ const AddressView = ({ address, onBack, onViewTx }: { address: string, onBack: (
       return '--';
     }
   };
+
+  useEffect(() => {
+    // reset per-address caches
+    setAddrTxs(null);
+    setContract(null);
+    setTab('overview');
+  }, [address]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1154,6 +1164,22 @@ const AddressView = ({ address, onBack, onViewTx }: { address: string, onBack: (
     return () => { cancelled = true; };
   }, [tab, address]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadContract = async () => {
+      try {
+        setContractLoading(true);
+        const res = await fetch(`/api/v2/smart-contracts/${address}`, { cache: 'no-store' });
+        if (res.status === 404) { if (!cancelled) setContract(null); return; }
+        if (res.status === 429) return;
+        const j = await res.json();
+        if (!cancelled) setContract(j);
+      } catch {}
+      finally { if (!cancelled) setContractLoading(false); }
+    };
+    if (tab === 'contract' && info?.is_contract && contract == null && !contractLoading) loadContract();
+    return () => { cancelled = true; };
+  }, [tab, address, info?.is_contract]);
 
   const copy = async (label: string, value: string) => {
     const ok = await copyToClipboard(value);
@@ -1211,7 +1237,12 @@ const AddressView = ({ address, onBack, onViewTx }: { address: string, onBack: (
       </div>
 
       <div className="mb-8 flex flex-wrap gap-2">
-        {[{k:'overview',label:'OVERVIEW'},{k:'txs',label:'TXS'},{k:'tokens',label:'TOKENS'}].map((t:any)=> (
+        {([
+          { k: 'overview', label: 'OVERVIEW' },
+          ...(info?.is_contract ? [{ k: 'contract', label: 'CONTRACT' }] : []),
+          { k: 'txs', label: 'TXS' },
+          { k: 'tokens', label: 'TOKENS' },
+        ] as any[]).map((t: any) => (
           <button
             key={t.k}
             onClick={() => setTab(t.k)}
@@ -1241,6 +1272,109 @@ const AddressView = ({ address, onBack, onViewTx }: { address: string, onBack: (
             <DetailRow label="UPDATED AT BLOCK" value={info?.block_number_balance_updated_at ?? '--'} />
             <DetailRow label="IS CONTRACT" value={String(info?.is_contract ?? '--')} />
           </div>
+        </div>
+      ) : tab === 'contract' ? (
+        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
+          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
+            <Code2 className="w-5 h-5 text-gold-500" /> CONTRACT
+          </h2>
+
+          {!info?.is_contract ? (
+            <div className="text-xs font-mono text-gold-500/60">Not a contract.</div>
+          ) : (
+            <>
+              <div className="text-xs font-mono text-gold-500/60 flex flex-wrap items-center gap-3">
+                <span>Status: <span className={info?.is_verified ? 'text-cyan-300' : 'text-gold-400'}>{info?.is_verified ? 'Verified' : 'Unverified'}</span></span>
+                <button
+                  onClick={() => { try { window.open(`http://139.180.140.143/address/${address}?tab=contract`, '_blank'); } catch {} }}
+                  className="text-[10px] font-mono text-cyan-300 border border-cyan-500/20 px-2 py-1 rounded hover:border-cyan-400/50"
+                >
+                  Verify / Publish (Blockscout)
+                </button>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
+                <div className="flex flex-col gap-2 border-b border-gold-500/10 pb-4">
+                  <span className="text-xs font-mono text-gold-500/50">CREATOR</span>
+                  <div className="flex items-start justify-between gap-3">
+                    {info?.creator_address_hash ? (
+                      <button
+                        onClick={() => onViewAddress(String(info.creator_address_hash))}
+                        className="text-left text-sm font-mono break-all text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                      >
+                        {String(info.creator_address_hash)}
+                      </button>
+                    ) : (
+                      <div className="text-sm font-mono break-all text-gold-400">--</div>
+                    )}
+                    {info?.creator_address_hash ? (
+                      <button
+                        onClick={() => copy('CREATOR', String(info.creator_address_hash))}
+                        className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors"
+                      >
+                        ⧉
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 border-b border-gold-500/10 pb-4">
+                  <span className="text-xs font-mono text-gold-500/50">CREATION TX</span>
+                  <div className="flex items-start justify-between gap-3">
+                    {info?.creation_transaction_hash ? (
+                      <button
+                        onClick={() => onViewTx(String(info.creation_transaction_hash))}
+                        className="text-left text-sm font-mono break-all text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                      >
+                        {String(info.creation_transaction_hash)}
+                      </button>
+                    ) : (
+                      <div className="text-sm font-mono break-all text-gold-400">--</div>
+                    )}
+                    {info?.creation_transaction_hash ? (
+                      <button
+                        onClick={() => copy('CREATION_TX', String(info.creation_transaction_hash))}
+                        className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors"
+                      >
+                        ⧉
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-mono text-gold-500/60 tracking-widest">CONTRACT CREATION CODE</div>
+                  {contract?.creation_bytecode ? (
+                    <button onClick={() => copy('CREATION_CODE', String(contract.creation_bytecode))} className="shrink-0 w-7 h-7 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
+                  ) : null}
+                </div>
+                <div className="mt-2 rounded-xl border border-gold-500/15 bg-dark-900/40 p-4">
+                  <pre className="whitespace-pre-wrap break-all text-[11px] leading-relaxed font-mono text-cyan-200/90 max-h-64 overflow-auto">
+                    {contractLoading ? 'Loading…' : (contract?.creation_bytecode || '—')}
+                  </pre>
+                </div>
+              </div>
+
+              <div className="mt-8">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-mono text-gold-500/60 tracking-widest">DEPLOYED BYTECODE</div>
+                  {contract?.deployed_bytecode ? (
+                    <button onClick={() => copy('DEPLOYED_BYTECODE', String(contract.deployed_bytecode))} className="shrink-0 w-7 h-7 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
+                  ) : null}
+                </div>
+                <div className="mt-2 rounded-xl border border-gold-500/15 bg-dark-900/40 p-4">
+                  <pre className="whitespace-pre-wrap break-all text-[11px] leading-relaxed font-mono text-cyan-200/90 max-h-64 overflow-auto">
+                    {contractLoading ? 'Loading…' : (contract?.deployed_bytecode || '—')}
+                  </pre>
+                </div>
+              </div>
+
+              <div className="mt-8 text-[11px] font-mono text-gold-500/50">
+                Tip: these fields come from Blockscout API v2 (<span className="text-cyan-300">:4000/api/v2</span>). If you want, I can also add ABI / Read / Write tabs once the contract is verified.
+              </div>
+            </>
+          )}
         </div>
       ) : tab === 'txs' ? (
         <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
@@ -1848,6 +1982,7 @@ export default function App() {
             address={selectedAddress || ''}
             onBack={() => setCurrentView('home')}
             onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
+            onViewAddress={(a: string) => handleViewAddress(a)}
           />
         ) : (
           <BlockView 
