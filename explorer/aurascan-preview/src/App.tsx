@@ -119,7 +119,7 @@ const Header = ({
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
             </span>
-            <span className="text-[10px] font-mono font-bold tracking-widest text-cyan-400">MAINNET</span>
+            <span className="text-[10px] font-mono font-bold tracking-widest text-cyan-400">TESTNET</span>
           </div>
         </div>
 
@@ -172,51 +172,90 @@ const Header = ({
   );
 };
 
-const Hero = () => (
-  <div className="py-20 flex flex-col items-center justify-center text-center relative">
-    <motion.div
-      initial={{ scale: 0.8, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ duration: 1, ease: "easeOut" }}
-      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-500/5 rounded-full blur-3xl pointer-events-none"
-    />
-    
-    <motion.div
-      initial={{ y: 20, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      className="relative z-10 mb-8"
-    >
-      <h1 className="text-5xl md:text-7xl font-black tracking-tighter mb-4">
-        DCAI <span className="glow-text-cyan text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 to-cyan-600">FOUNDATION</span>
-      </h1>
-      <p className="font-mono text-gold-500/60 max-w-2xl mx-auto">
-        EXPLORE THE DCAI L3 NETWORK. REAL-TIME DATA STREAMING. UNCOMPROMISED SECURITY.
-      </p>
-    </motion.div>
+const Hero = () => {
+  const [q, setQ] = useState('');
+  const [err, setErr] = useState<string | null>(null);
 
-    <motion.div
-      initial={{ y: 20, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ delay: 0.2 }}
-      className="w-full max-w-3xl relative z-10 group px-4"
-    >
-      <div className="absolute -inset-1 bg-gradient-to-r from-gold-600 via-cyan-500 to-gold-400 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
-      <div className="relative flex items-center bg-dark-800/90 backdrop-blur-sm border border-cyan-500/40 rounded-xl p-2 shadow-[0_0_30px_rgba(0,240,255,0.1)]">
-        <div className="pl-4 pr-2">
-          <Search className="w-6 h-6 text-cyan-400" />
+  const doSearch = () => {
+    const s = q.trim();
+    if (!s) return;
+    setErr(null);
+
+    const mBlock = s.match(/^#?(\d+)$/);
+    if (mBlock) {
+      navigateTo(`/block/${mBlock[1]}`);
+      return;
+    }
+
+    if (/^0x[0-9a-fA-F]{40}$/.test(s)) {
+      navigateTo(`/address/${s}`);
+      return;
+    }
+
+    if (/^0x[0-9a-fA-F]{64}$/.test(s)) {
+      navigateTo(`/tx/${s}`);
+      return;
+    }
+
+    setErr('Invalid query. Try 0x… address / 0x… tx hash / block number.');
+  };
+
+  return (
+    <div className="py-20 flex flex-col items-center justify-center text-center relative">
+      <motion.div
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 1, ease: 'easeOut' }}
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-500/5 rounded-full blur-3xl pointer-events-none"
+      />
+
+      <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="relative z-10 mb-8">
+        <h1 className="text-5xl md:text-7xl font-black tracking-tighter mb-4">
+          DCAI{' '}
+          <span className="glow-text-cyan text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 to-cyan-600">FOUNDATION</span>
+        </h1>
+        <p className="font-mono text-gold-500/60 max-w-2xl mx-auto">
+          EXPLORE THE DCAI L3 NETWORK. REAL-TIME DATA STREAMING. UNCOMPROMISED SECURITY.
+        </p>
+      </motion.div>
+
+      <motion.div
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.2 }}
+        className="w-full max-w-3xl relative z-10 group px-4"
+      >
+        <div className="absolute -inset-1 bg-gradient-to-r from-gold-600 via-cyan-500 to-gold-400 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-500" />
+        <div className="relative flex items-center bg-dark-800/90 backdrop-blur-sm border border-cyan-500/40 rounded-xl p-2 shadow-[0_0_30px_rgba(0,240,255,0.1)]">
+          <div className="pl-4 pr-2">
+            <Search className="w-6 h-6 text-cyan-400" />
+          </div>
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              if (err) setErr(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') doSearch();
+            }}
+            placeholder="Search by Address / Txn Hash / Block / Token..."
+            className="w-full bg-transparent border-none outline-none text-gold-500 placeholder-gold-500/40 font-mono text-sm sm:text-lg py-3"
+          />
+          <button
+            onClick={doSearch}
+            className="bg-cyan-500 text-dark-900 px-4 sm:px-8 py-3 rounded-lg font-bold font-mono hover:bg-cyan-400 transition-colors shadow-[0_0_15px_rgba(0,240,255,0.5)]"
+          >
+            SCAN
+          </button>
         </div>
-        <input
-          type="text"
-          placeholder="Search by Address / Txn Hash / Block / Token..."
-          className="w-full bg-transparent border-none outline-none text-gold-500 placeholder-gold-500/40 font-mono text-sm sm:text-lg py-3"
-        />
-        <button className="bg-cyan-500 text-dark-900 px-4 sm:px-8 py-3 rounded-lg font-bold font-mono hover:bg-cyan-400 transition-colors shadow-[0_0_15px_rgba(0,240,255,0.5)]">
-          SCAN
-        </button>
-      </div>
-    </motion.div>
-  </div>
-);
+
+        {err ? <div className="mt-3 text-[11px] font-mono text-rose-300">{err}</div> : null}
+      </motion.div>
+    </div>
+  );
+};
 
 const Stats = () => {
   const [stats, setStats] = useState<any>(null);
