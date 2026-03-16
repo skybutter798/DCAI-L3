@@ -389,24 +389,53 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const [pageParams, setPageParams] = useState<any | null>(null);
+  const [nextParams, setNextParams] = useState<any | null>(null);
+  const [prevStack, setPrevStack] = useState<any[]>([]);
+
   const short = (s: string, a = 10, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
 
   useEffect(() => {
     let cancelled = false;
+
+    const buildUrl = () => {
+      const sp = new URLSearchParams();
+      sp.set('type', 'block');
+      // Blockscout typically returns 50 items per page; keep limit small anyway.
+      sp.set('limit', '25');
+      if (pageParams) {
+        for (const [k, v] of Object.entries(pageParams)) {
+          if (v == null) continue;
+          sp.set(String(k), String(v));
+        }
+      }
+      return `/api/v2/blocks?${sp.toString()}`;
+    };
+
     const load = async () => {
       try {
         setLoading(true);
-        const res = await fetch('/api/v2/blocks?type=block&limit=25', { cache: 'no-store' });
+        const res = await fetch(buildUrl(), { cache: 'no-store' });
         if (res.status === 429) return;
         const j = await res.json();
-        if (!cancelled) setItems(j?.items || []);
+        if (!cancelled) {
+          setItems(j?.items || []);
+          setNextParams(j?.next_page_params || null);
+        }
       } catch {}
       finally { if (!cancelled) setLoading(false); }
     };
+
     load();
-    const id = window.setInterval(load, 8000);
-    return () => { cancelled = true; window.clearInterval(id); };
-  }, []);
+
+    // Only auto-refresh the first page
+    if (!pageParams) {
+      const id = window.setInterval(load, 8000);
+      return () => { cancelled = true; window.clearInterval(id); };
+    }
+
+    return () => { cancelled = true; };
+  }, [pageParams]);
 
   return (
     <motion.div
@@ -415,13 +444,43 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
       exit={{ opacity: 0, y: -20 }}
       className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
     >
-      <div className="mb-6 flex items-center gap-4">
-        <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/20 shadow-[0_0_20px_rgba(0,240,255,0.10)]">
-          <List className="w-8 h-8 text-cyan-400" />
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/20 shadow-[0_0_20px_rgba(0,240,255,0.10)]">
+            <List className="w-8 h-8 text-cyan-400" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-3xl md:text-4xl font-black tracking-widest">BLOCKS <span className="glow-text-cyan text-cyan-400">LIST</span></h1>
+            <div className="mt-2 text-xs font-mono text-gold-500/60">{loading ? 'Loading…' : (items ? `${items.length} block(s)` : '—')}</div>
+          </div>
         </div>
-        <div className="min-w-0">
-          <h1 className="text-3xl md:text-4xl font-black tracking-widest">BLOCKS <span className="glow-text-cyan text-cyan-400">LIST</span></h1>
-          <div className="mt-2 text-xs font-mono text-gold-500/60">{loading ? 'Loading…' : (items ? `${items.length} block(s)` : '—')}</div>
+
+        <div className="flex items-center gap-2">
+          <button
+            disabled={prevStack.length === 0}
+            onClick={() => {
+              if (!prevStack.length) return;
+              const copy = prevStack.slice();
+              const prev = copy.pop();
+              setPrevStack(copy);
+              setPageParams(prev || null);
+            }}
+            className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${prevStack.length ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
+          >
+            PREV
+          </button>
+
+          <button
+            disabled={!nextParams}
+            onClick={() => {
+              if (!nextParams) return;
+              setPrevStack(s => [...s, pageParams]);
+              setPageParams(nextParams);
+            }}
+            className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${nextParams ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
+          >
+            NEXT
+          </button>
         </div>
       </div>
 
