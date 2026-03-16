@@ -1327,7 +1327,7 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
             <DetailRow label="HASH" value={tx?.hash || hash} isCyan />
             <DetailRow label="RESULT" value={tx?.result || '--'} />
-            <DetailRow label="BLOCK" value={tx?.block ? `#${tx.block}` : '--'} isCyan />
+            <DetailRow label="BLOCK" value={(tx?.block_number ?? tx?.block) != null ? `#${tx.block_number ?? tx.block}` : '--'} isCyan />
             <DetailRow label="POSITION" value={tx?.position ?? '--'} />
             <DetailRow label="FROM" value={tx?.from?.hash || '--'} isCyan onCopy={() => tx?.from?.hash && copy('FROM', tx.from.hash)} />
             <DetailRow label="TO" value={tx?.to?.hash || '--'} onCopy={() => tx?.to?.hash && copy('TO', tx.to.hash)} />
@@ -1341,6 +1341,28 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
         </div>
       </div>
 
+      <div className="-mt-6 mb-10 flex flex-wrap gap-2">
+        <button
+          onClick={() => tx?.from?.hash && onViewAddress(String(tx.from.hash))}
+          className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors"
+        >
+          OPEN FROM
+        </button>
+        <button
+          onClick={() => tx?.to?.hash && onViewAddress(String(tx.to.hash))}
+          className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors"
+        >
+          OPEN TO
+        </button>
+        {(tx?.block_number ?? tx?.block) != null ? (
+          <button
+            onClick={() => onViewBlock(Number(tx?.block_number ?? tx?.block))}
+            className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors"
+          >
+            OPEN BLOCK
+          </button>
+        ) : null}
+      </div>
 
       <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30 mb-10 overflow-hidden relative">
         <div className="flex items-center justify-between gap-4">
@@ -1938,7 +1960,27 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress }: { address: st
                         {tx.hash}
                       </button>
                       <div className="mt-1 text-[10px] font-mono text-gold-500/50">
-                        status {tx.status ?? tx.result ?? '--'} · block {tx.block ?? '--'} · pos {tx.position ?? '--'}
+                        status {tx.status ?? tx.result ?? '--'} · block {tx.block_number ?? tx.block ?? '--'} · pos {tx.position ?? '--'}
+                      </div>
+                      <div className="mt-2 text-[10px] font-mono text-gold-500/55 flex flex-col gap-1">
+                        <div>
+                          <span className="text-gold-500/35">from</span>{' '}
+                          <button
+                            onClick={() => tx?.from?.hash && onViewAddress(String(tx.from.hash))}
+                            className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                          >
+                            {String(tx?.from?.hash || '').slice(0, 10)}…{String(tx?.from?.hash || '').slice(-6)}
+                          </button>
+                        </div>
+                        <div>
+                          <span className="text-gold-500/35">to</span>{' '}
+                          <button
+                            onClick={() => tx?.to?.hash && onViewAddress(String(tx.to.hash))}
+                            className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                          >
+                            {String(tx?.to?.hash || '').slice(0, 10)}…{String(tx?.to?.hash || '').slice(-6)}
+                          </button>
+                        </div>
                       </div>
                     </div>
                     <div className="shrink-0 text-right">
