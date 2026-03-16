@@ -1872,8 +1872,10 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
 };
 
 
-const AddressView = ({ address, onBack, onViewTx, onViewAddress }: { address: string, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void }) => {
+const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: { address: string, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void, onViewToken: (a: string) => void }) => {
   const [info, setInfo] = useState<any>(null);
+  const [tokenMeta, setTokenMeta] = useState<any>(null);
+  const [tokenMetaLoading, setTokenMetaLoading] = useState<boolean>(false);
   const [tab, setTab] = useState<'overview' | 'contract' | 'txs' | 'tokens'>('overview');
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [addrTxs, setAddrTxs] = useState<any[] | null>(null);
@@ -1913,6 +1915,33 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress }: { address: st
       } catch {}
     };
     load();
+    return () => { cancelled = true; };
+  }, [address]);
+
+  // Detect if this address is a token contract (so we can suggest the Token page)
+  useEffect(() => {
+    let cancelled = false;
+    const loadTokenMeta = async () => {
+      try {
+        setTokenMetaLoading(true);
+        const res = await fetch(`/api/v2/tokens/${address}`, { cache: 'no-store' });
+        if (res.status === 404) {
+          if (!cancelled) setTokenMeta(null);
+          return;
+        }
+        if (res.status === 429) return;
+        const j = await res.json();
+        if (!cancelled && j?.address) setTokenMeta(j);
+      } catch {
+        if (!cancelled) setTokenMeta(null);
+      } finally {
+        if (!cancelled) setTokenMetaLoading(false);
+      }
+    };
+
+    setTokenMeta(null);
+    loadTokenMeta();
+
     return () => { cancelled = true; };
   }, [address]);
 
@@ -2003,6 +2032,28 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress }: { address: st
           </div>
         </div>
       </div>
+
+      {tokenMeta ? (
+        <div className="mb-6 glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-4 border-t-2 border-t-cyan-500/30">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xs font-mono text-gold-500/60">This address is a token contract</div>
+              <div className="mt-1 text-sm font-mono text-cyan-300">
+                {String(tokenMeta.symbol || 'TOKEN')} · {String(tokenMeta.name || 'Token')}
+              </div>
+              <div className="mt-1 text-[10px] font-mono text-gold-500/45">decimals {String(tokenMeta.decimals ?? '--')} · holders {String(tokenMeta.holders ?? '--')}</div>
+            </div>
+            <button
+              onClick={() => onViewToken(String(tokenMeta.address || address))}
+              className="shrink-0 px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60"
+            >
+              OPEN TOKEN PAGE
+            </button>
+          </div>
+        </div>
+      ) : tokenMetaLoading ? (
+        <div className="mb-6 text-xs font-mono text-gold-500/50">Checking token metadata…</div>
+      ) : null}
 
       <div className="mb-8 flex flex-wrap gap-2">
         {([
@@ -2422,8 +2473,17 @@ const TokenView = ({
 }) => {
   const [info, setInfo] = useState<any>(null);
   const [tab, setTab] = useState<'overview' | 'transfers' | 'holders'>('transfers');
+
   const [transfers, setTransfers] = useState<any[] | null>(null);
+  const [transfersPageParams, setTransfersPageParams] = useState<any | null>(null);
+  const [transfersNextParams, setTransfersNextParams] = useState<any | null>(null);
+  const [transfersPrevStack, setTransfersPrevStack] = useState<any[]>([]);
+
   const [holders, setHolders] = useState<any[] | null>(null);
+  const [holdersPageParams, setHoldersPageParams] = useState<any | null>(null);
+  const [holdersNextParams, setHoldersNextParams] = useState<any | null>(null);
+  const [holdersPrevStack, setHoldersPrevStack] = useState<any[]>([]);
+
   const [loading, setLoading] = useState(false);
 
   const short = (s: string, a = 10, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
@@ -2462,38 +2522,75 @@ const TokenView = ({
     };
   }, [address]);
 
+  // Reset pagination caches when switching tokens
+  useEffect(() => {
+    setTransfers(null);
+    setTransfersPageParams(null);
+    setTransfersNextParams(null);
+    setTransfersPrevStack([]);
+
+    setHolders(null);
+    setHoldersPageParams(null);
+    setHoldersNextParams(null);
+    setHoldersPrevStack([]);
+  }, [address]);
+
   useEffect(() => {
     let cancelled = false;
 
     const loadTransfers = async () => {
       try {
-        const res = await fetch(`/api/v2/tokens/${address}/transfers?limit=25`, { cache: 'no-store' });
+        const sp = new URLSearchParams();
+        sp.set('limit', '25');
+        if (transfersPageParams) {
+          for (const [k, v] of Object.entries(transfersPageParams)) if (v != null) sp.set(String(k), String(v));
+        }
+        const res = await fetch(`/api/v2/tokens/${address}/transfers?${sp.toString()}`, { cache: 'no-store' });
         if (res.status === 429) return;
         const j = await res.json();
-        if (!cancelled) setTransfers(j?.items || []);
+        if (!cancelled) {
+          setTransfers(j?.items || []);
+          setTransfersNextParams(j?.next_page_params || null);
+        }
       } catch {
-        if (!cancelled) setTransfers([]);
+        if (!cancelled) {
+          setTransfers([]);
+          setTransfersNextParams(null);
+        }
       }
     };
 
     const loadHolders = async () => {
       try {
-        const res = await fetch(`/api/v2/tokens/${address}/holders?limit=25`, { cache: 'no-store' });
+        const sp = new URLSearchParams();
+        sp.set('limit', '25');
+        if (holdersPageParams) {
+          for (const [k, v] of Object.entries(holdersPageParams)) if (v != null) sp.set(String(k), String(v));
+        }
+        const res = await fetch(`/api/v2/tokens/${address}/holders?${sp.toString()}`, { cache: 'no-store' });
         if (res.status === 429) return;
         const j = await res.json();
-        if (!cancelled) setHolders(j?.items || []);
+        if (!cancelled) {
+          setHolders(j?.items || []);
+          setHoldersNextParams(j?.next_page_params || null);
+        }
       } catch {
-        if (!cancelled) setHolders([]);
+        if (!cancelled) {
+          setHolders([]);
+          setHoldersNextParams(null);
+        }
       }
     };
 
-    if (address && tab === 'transfers' && transfers == null) loadTransfers();
-    if (address && tab === 'holders' && holders == null) loadHolders();
+    if (!address) return () => { cancelled = true; };
+
+    if (tab === 'transfers') loadTransfers();
+    if (tab === 'holders') loadHolders();
 
     return () => {
       cancelled = true;
     };
-  }, [address, tab]);
+  }, [address, tab, transfersPageParams, holdersPageParams]);
 
   const decimals = info?.decimals ?? '18';
   const symbol = info?.symbol || 'TOKEN';
@@ -2573,6 +2670,33 @@ const TokenView = ({
           </h2>
           <div className="mt-2 text-xs font-mono text-gold-500/60">{holders == null ? 'Loading…' : `${holders.length} holder(s)`}</div>
 
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              disabled={holdersPrevStack.length === 0}
+              onClick={() => {
+                if (!holdersPrevStack.length) return;
+                const copy = holdersPrevStack.slice();
+                const prev = copy.pop();
+                setHoldersPrevStack(copy);
+                setHoldersPageParams(prev || null);
+              }}
+              className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${holdersPrevStack.length ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
+            >
+              PREV
+            </button>
+            <button
+              disabled={!holdersNextParams}
+              onClick={() => {
+                if (!holdersNextParams) return;
+                setHoldersPrevStack((s) => [...s, holdersPageParams]);
+                setHoldersPageParams(holdersNextParams);
+              }}
+              className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${holdersNextParams ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
+            >
+              NEXT
+            </button>
+          </div>
+
           <div className="mt-6 space-y-3">
             {(holders || []).map((h: any, i: number) => {
               const a = String(h?.address?.hash || h?.address || '').trim();
@@ -2606,6 +2730,33 @@ const TokenView = ({
             <ArrowRightLeft className="w-5 h-5" /> TOKEN TRANSFERS
           </h2>
           <div className="mt-2 text-xs font-mono text-gold-500/60">{transfers == null ? 'Loading…' : `${transfers.length} transfer(s)`}</div>
+
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              disabled={transfersPrevStack.length === 0}
+              onClick={() => {
+                if (!transfersPrevStack.length) return;
+                const copy = transfersPrevStack.slice();
+                const prev = copy.pop();
+                setTransfersPrevStack(copy);
+                setTransfersPageParams(prev || null);
+              }}
+              className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${transfersPrevStack.length ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
+            >
+              PREV
+            </button>
+            <button
+              disabled={!transfersNextParams}
+              onClick={() => {
+                if (!transfersNextParams) return;
+                setTransfersPrevStack((s) => [...s, transfersPageParams]);
+                setTransfersPageParams(transfersNextParams);
+              }}
+              className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${transfersNextParams ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
+            >
+              NEXT
+            </button>
+          </div>
 
           <div className="mt-6 space-y-3">
             {(transfers || []).map((tr: any, i: number) => {
@@ -3355,6 +3506,7 @@ export default function App() {
             onBack={() => setCurrentView('home')}
             onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
             onViewAddress={(a: string) => handleViewAddress(a)}
+            onViewToken={(a: string) => handleViewToken(a)}
           />
         ) : (
           <BlockView 
