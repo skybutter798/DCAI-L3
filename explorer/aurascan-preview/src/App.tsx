@@ -784,36 +784,43 @@ const TxsListView = ({ onViewTx, onViewAddress }: { onViewTx: (h: string) => voi
                   <div className="text-[10px] font-mono text-gold-500/60">{timeAgo(String(tx.timestamp || ''))}</div>
                   <div className="text-[10px] font-mono text-gold-500/35">{String(tx.timestamp || '').replace('T', ' ').replace('Z', '')}</div>
 
-                  <div className="mt-2 text-xs font-mono text-gold-500/90 tabular-nums">
-                    {(() => {
-                      const p = fmtTDCAIParts(tx.value, 6);
-                      return (
-                        <span>
-                          <span className="inline-block text-right w-[72px]">{p.i}</span>
-                          <span className="text-gold-500/60">.</span>
-                          <span className="inline-block w-[52px]">{p.f}</span>
-                          <span className="ml-1 text-gold-500/60">tDCAI</span>
-                        </span>
-                      );
-                    })()}
-                  </div>
-                  <div className="text-[10px] font-mono text-gold-500/35">{String(tx.value ?? '0')} wei</div>
+                  <div className="mt-3 grid gap-3 tabular-nums">
+                    <div>
+                      <div className="text-[10px] font-mono tracking-widest text-gold-500/45">VALUE</div>
+                      <div className="mt-1 text-sm font-mono text-cyan-200/90">
+                        {(() => {
+                          const p = fmtTDCAIParts(tx.value, 6);
+                          return (
+                            <span>
+                              <span className="inline-block text-right w-[72px]">{p.i}</span>
+                              <span className="text-cyan-200/40">.</span>
+                              <span className="inline-block w-[52px]">{p.f}</span>
+                              <span className="ml-1 text-cyan-200/50">tDCAI</span>
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="text-[10px] font-mono text-gold-500/35">{String(tx.value ?? '0')} wei</div>
+                    </div>
 
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/70 tabular-nums">
-                    {(() => {
-                      const p = fmtTDCAIParts(tx.fee?.value ?? tx.fee ?? '0', 6);
-                      return (
-                        <span>
-                          <span className="text-gold-500/50">fee</span>{' '}
-                          <span className="inline-block text-right w-[72px]">{p.i}</span>
-                          <span className="text-gold-500/50">.</span>
-                          <span className="inline-block w-[52px]">{p.f}</span>
-                          <span className="ml-1 text-gold-500/50">tDCAI</span>
-                        </span>
-                      );
-                    })()}
+                    <div>
+                      <div className="text-[10px] font-mono tracking-widest text-gold-500/45">FEE</div>
+                      <div className="mt-1 text-sm font-mono text-gold-500/90">
+                        {(() => {
+                          const p = fmtTDCAIParts(tx.fee?.value ?? tx.fee ?? '0', 6);
+                          return (
+                            <span>
+                              <span className="inline-block text-right w-[72px]">{p.i}</span>
+                              <span className="text-gold-500/50">.</span>
+                              <span className="inline-block w-[52px]">{p.f}</span>
+                              <span className="ml-1 text-gold-500/50">tDCAI</span>
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="text-[10px] font-mono text-gold-500/35">{String(tx.fee?.value ?? tx.fee ?? '0')} wei</div>
+                    </div>
                   </div>
-                  <div className="text-[10px] font-mono text-gold-500/35">{String(tx.fee?.value ?? tx.fee ?? '0')} wei</div>
                 </div>
               </div>
             </motion.div>
