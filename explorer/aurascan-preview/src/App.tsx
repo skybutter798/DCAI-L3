@@ -3346,6 +3346,9 @@ const DashboardView = () => {
                 <div key={i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
                   <div className="text-xs font-mono text-gold-500/60">tier <span className="text-cyan-300">{k.tier}</span></div>
                   <div className="mt-1 text-[11px] font-mono text-gold-500/70 break-all">key {k.key}</div>
+                  <div className="mt-2 text-[10px] font-mono text-gold-500/50">
+                    usage today <span className="text-cyan-200/90">{k?.usage?.today ?? '--'}</span> · last 5m <span className="text-cyan-200/90">{k?.usage?.last5m ?? '--'}</span> · last 60m <span className="text-cyan-200/90">{k?.usage?.last60m ?? '--'}</span>
+                  </div>
                   <div className="mt-3 text-[11px] font-mono text-gold-500/60">HTTP</div>
                   <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.http}</div>
                   <div className="mt-2 text-[11px] font-mono text-gold-500/60">WS</div>
