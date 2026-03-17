@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 import DetailRow from '../components/DetailRow';
+import { shortHash, formatUnits } from '../lib/formatters';
 
 const TokenView = ({
   address,
@@ -30,22 +31,6 @@ const TokenView = ({
   const [holdersPrevStack, setHoldersPrevStack] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(false);
-
-  const short = (s: string, a = 10, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
-
-  const fmtUnits = (valueLike: any, decimalsLike: any, dp = 6) => {
-    try {
-      const d = Number(decimalsLike ?? 18);
-      const v = BigInt(String(valueLike ?? '0'));
-      const s = v.toString();
-      const pad = s.length <= d ? '0'.repeat(d - s.length + 1) + s : s;
-      const head = pad.slice(0, -d);
-      const tail = pad.slice(-d);
-      return `${head}.${tail.slice(0, dp)}`;
-    } catch {
-      return '--';
-    }
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -204,7 +189,7 @@ const TokenView = ({
             <DetailRow label="SYMBOL" value={symbol} isCyan />
             <DetailRow label="NAME" value={name || '--'} />
             <DetailRow label="DECIMALS" value={String(decimals)} />
-            <DetailRow label="TOTAL SUPPLY" value={`${fmtUnits(info?.total_supply, decimals, 6)} ${symbol}`} />
+            <DetailRow label="TOTAL SUPPLY" value={`${formatUnits(info?.total_supply, decimals, 6)} ${symbol}`} />
           </div>
           <div className="mt-4 text-[11px] font-mono text-gold-500/50">{loading ? 'Loading…' : ''}</div>
         </div>
@@ -253,10 +238,10 @@ const TokenView = ({
                       onClick={() => a && onViewAddress(a)}
                       className="text-left text-[11px] font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60 break-all"
                     >
-                      {a ? short(a, 14, 10) : '--'}
+                      {a ? shortHash(a, 14, 10) : '--'}
                     </button>
                     <div className="text-right">
-                      <div className="text-sm font-mono text-gold-500/90">{fmtUnits(v, decimals, 6)} {symbol}</div>
+                      <div className="text-sm font-mono text-gold-500/90">{formatUnits(v, decimals, 6)} {symbol}</div>
                       <div className="text-[10px] font-mono text-gold-500/35">{String(v ?? '--')} raw</div>
                     </div>
                   </div>
@@ -333,7 +318,7 @@ const TokenView = ({
                             onClick={() => onViewTx(txh)}
                             className="text-left text-[11px] font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60 break-all"
                           >
-                            {short(txh, 14, 10)}
+                            {shortHash(txh, 14, 10)}
                           </button>
                         ) : null}
                         {Number.isFinite(bn) ? (
@@ -349,17 +334,17 @@ const TokenView = ({
                       <div className="mt-2 text-[10px] font-mono text-gold-500/55 flex flex-col gap-1">
                         <div>
                           <span className="text-gold-500/35">from</span>{' '}
-                          <button onClick={() => from && onViewAddress(from)} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">{short(from, 12, 6)}</button>
+                          <button onClick={() => from && onViewAddress(from)} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">{shortHash(from, 12, 6)}</button>
                         </div>
                         <div>
                           <span className="text-gold-500/35">to</span>{' '}
-                          <button onClick={() => to && onViewAddress(to)} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">{short(to, 12, 6)}</button>
+                          <button onClick={() => to && onViewAddress(to)} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">{shortHash(to, 12, 6)}</button>
                         </div>
                       </div>
                     </div>
 
                     <div className="shrink-0 text-right">
-                      <div className="text-sm font-mono text-gold-500/90">{fmtUnits(amt, decimals, 6)} <span className="text-gold-500/60">{symbol}</span></div>
+                      <div className="text-sm font-mono text-gold-500/90">{formatUnits(amt, decimals, 6)} <span className="text-gold-500/60">{symbol}</span></div>
                       <div className="text-[10px] font-mono text-gold-500/35">tokenId {tokenId == null ? '-' : String(tokenId)}</div>
                     </div>
                   </div>

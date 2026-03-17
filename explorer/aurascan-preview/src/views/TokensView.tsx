@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
+import { shortHash } from '../lib/formatters';
 
 const TokensView = ({
   onViewToken,
@@ -13,8 +14,6 @@ const TokensView = ({
   const [featuredLoading, setFeaturedLoading] = useState(true);
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const short = (s: string, a = 10, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,7 +154,7 @@ const TokensView = ({
                         onClick={() => onViewToken(addr)}
                         className="mt-1 text-left text-[11px] font-mono text-gold-500/60 hover:text-cyan-300 break-all underline decoration-gold-500/10 hover:decoration-cyan-400/60"
                       >
-                        {short(addr, 14, 10)}
+                        {shortHash(addr, 14, 10)}
                       </button>
                     ) : (
                       <div className="mt-1 text-[11px] font-mono text-gold-500/40">--</div>

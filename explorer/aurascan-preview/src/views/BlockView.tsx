@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 import { copyToClipboard } from '../lib/appUtils';
+import { shortHash } from '../lib/formatters';
 import DetailRow from '../components/DetailRow';
 
 const BlockView = ({ block, onBack, onViewTx, onViewAddress }: { block: any, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void, key?: string }) => {
@@ -44,7 +45,7 @@ const BlockView = ({ block, onBack, onViewTx, onViewAddress }: { block: any, onB
       }
     };
 
-    const short = (addr: string) => (addr ? (addr.slice(0, 6) + '…' + addr.slice(-4)) : '--');
+    const short = (addr: string) => shortHash(addr, 6, 4);
 
     const load = async () => {
       try {

@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 import { copyToClipboard } from '../lib/appUtils';
+import { shortHash, formatTDCAI } from '../lib/formatters';
 import DetailRow from '../components/DetailRow';
 
 const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, onBack: () => void, onViewBlock: (h: number) => void, onViewAddress: (a: string) => void }) => {
@@ -15,21 +16,6 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
   const [logOpen, setLogOpen] = useState<Record<string, boolean>>({});
   const [transfers, setTransfers] = useState<any[] | null>(null);
   const [transfersLoading, setTransfersLoading] = useState<boolean>(false);
-
-  const fmtTDCAI = (weiLike: any, dp = 6) => {
-    try {
-      const wei = BigInt(String(weiLike ?? '0'));
-      const s = wei.toString();
-      const pad = s.length <= 18 ? '0'.repeat(18 - s.length + 1) + s : s;
-      const head = pad.slice(0, -18);
-      const tail = pad.slice(-18);
-      return `${head}.${tail.slice(0, dp)}`;
-    } catch {
-      return '--';
-    }
-  };
-
-  const short = (addr: string) => (addr ? (addr.slice(0, 6) + '…' + addr.slice(-4)) : '--');
 
   const EVENT_SIGS: Record<string, string> = {
     // ERC-20 / ERC-721
@@ -263,7 +249,7 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
                 ) : null}
               </div>
             </div>
-            <DetailRow label="VALUE" value={`${fmtTDCAI(tx?.value)} tDCAI`} isCyan />
+            <DetailRow label="VALUE" value={`${formatTDCAI(tx?.value)} tDCAI`} isCyan />
             <DetailRow label="FEE (wei)" value={tx?.fee?.value ?? tx?.fee ?? '--'} />
             <DetailRow label="GAS USED" value={tx?.gas_used ?? '--'} />
             <DetailRow label="GAS PRICE" value={tx?.gas_price ?? tx?.max_fee_per_gas ?? '--'} />

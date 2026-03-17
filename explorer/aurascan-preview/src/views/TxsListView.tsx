@@ -1,6 +1,8 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
+import { setRouteQuery } from '../lib/appUtils';
+import { shortHash, formatTDCAI, formatTDCAIParts } from '../lib/formatters';
 
 const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: string) => void, onViewAddress: (a: string) => void, onViewBlock: (h: number) => void }) => {
   const [items, setItems] = useState<any[] | null>(null);
@@ -21,28 +23,6 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
   });
   const [nextParams, setNextParams] = useState<any | null>(null);
   const [prevStack, setPrevStack] = useState<any[]>([]);
-
-  const short = (s: string, a = 12, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
-
-  const fmtTDCAI = (weiLike: any, dp = 6) => {
-    try {
-      const wei = BigInt(String(weiLike ?? '0'));
-      const s = wei.toString();
-      const pad = s.length <= 18 ? '0'.repeat(18 - s.length + 1) + s : s;
-      const head = pad.slice(0, -18);
-      const tail = pad.slice(-18);
-      return `${head}.${tail.slice(0, dp)}`;
-    } catch {
-      return '--';
-    }
-  };
-
-  const fmtTDCAIParts = (weiLike: any, dp = 6) => {
-    const s = fmtTDCAI(weiLike, dp);
-    if (s === '--') return { i: '--', f: ''.padEnd(dp, '-') };
-    const [i, f0] = String(s).split('.');
-    return { i: i || '0', f: (f0 || '').padEnd(dp, '0').slice(0, dp) };
-  };
 
   const methodLabel = (tx: any) => {
     try {
@@ -86,16 +66,7 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
     }
   };
 
-  const setTxsUrl = (p: any | null, replace = false) => {
-    try {
-      const sp = new URLSearchParams();
-      if (p) for (const [k, v] of Object.entries(p)) if (v != null) sp.set(String(k), String(v));
-      const qs = sp.toString();
-      const url = '/txs' + (qs ? `?${qs}` : '');
-      const fn: any = replace ? window.history.replaceState : window.history.pushState;
-      fn.call(window.history, { view: 'txs' }, '', url);
-    } catch {}
-  };
+  const setTxsUrl = (p: any | null, replace = false) => setRouteQuery('/txs', p, { view: 'txs' }, replace);
 
   useEffect(() => {
     let cancelled = false;
@@ -230,18 +201,18 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
                     <div>
                       <span className="text-gold-500/35">from</span>{' '}
                       <button onClick={() => tx?.from?.hash && onViewAddress(String(tx.from.hash))} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">
-                        {short(String(tx.from?.hash || ''))}
+                        {shortHash(String(tx.from?.hash || ''))}
                       </button>
                     </div>
                     <div>
                       <span className="text-gold-500/35">to</span>{' '}
                       {tx?.created_contract?.hash ? (
                         <button onClick={() => onViewAddress(String(tx.created_contract.hash))} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">
-                          {short(String(tx.created_contract.hash))}
+                          {shortHash(String(tx.created_contract.hash))}
                         </button>
                       ) : (
                         <button onClick={() => tx?.to?.hash && onViewAddress(String(tx.to.hash))} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">
-                          {short(String(tx.to?.hash || ''))}
+                          {shortHash(String(tx.to?.hash || ''))}
                         </button>
                       )}
                     </div>
@@ -257,7 +228,7 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
                       <div className="text-[10px] font-mono tracking-widest text-gold-500/45">VALUE</div>
                       <div className="mt-1 text-sm font-mono text-cyan-200/90">
                         {(() => {
-                          const p = fmtTDCAIParts(tx.value, 6);
+                          const p = formatTDCAIParts(tx.value, 6);
                           return (
                             <span>
                               <span className="inline-block text-right w-[72px]">{p.i}</span>
@@ -275,7 +246,7 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
                       <div className="text-[10px] font-mono tracking-widest text-gold-500/45">FEE</div>
                       <div className="mt-1 text-sm font-mono text-gold-500/90">
                         {(() => {
-                          const p = fmtTDCAIParts(tx.fee?.value ?? tx.fee ?? '0', 6);
+                          const p = formatTDCAIParts(tx.fee?.value ?? tx.fee ?? '0', 6);
                           return (
                             <span>
                               <span className="inline-block text-right w-[72px]">{p.i}</span>

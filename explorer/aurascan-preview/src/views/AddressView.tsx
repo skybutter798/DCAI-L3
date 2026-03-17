@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 import { copyToClipboard } from '../lib/appUtils';
+import { formatTDCAI } from '../lib/formatters';
 import DetailRow from '../components/DetailRow';
 
 const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: { address: string, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void, onViewToken: (a: string) => void }) => {
@@ -15,19 +16,6 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
 
   const [contract, setContract] = useState<any>(null);
   const [contractLoading, setContractLoading] = useState<boolean>(false);
-
-  const fmtTDCAI = (weiLike: any, dp = 6) => {
-    try {
-      const wei = BigInt(String(weiLike ?? '0'));
-      const s = wei.toString();
-      const pad = s.length <= 18 ? '0'.repeat(18 - s.length + 1) + s : s;
-      const head = pad.slice(0, -18);
-      const tail = pad.slice(-18);
-      return `${head}.${tail.slice(0, dp)}`;
-    } catch {
-      return '--';
-    }
-  };
 
   useEffect(() => {
     // reset per-address caches
@@ -219,7 +207,7 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
             <DetailRow label="ADDRESS" value={info?.hash || address} isCyan />
-            <DetailRow label="COIN BALANCE" value={`${fmtTDCAI(info?.coin_balance)} tDCAI`} />
+            <DetailRow label="COIN BALANCE" value={`${formatTDCAI(info?.coin_balance)} tDCAI`} />
             <DetailRow label="UPDATED AT BLOCK" value={info?.block_number_balance_updated_at ?? '--'} />
             <DetailRow label="IS CONTRACT" value={String(info?.is_contract ?? '--')} />
           </div>
@@ -379,10 +367,10 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
                     </div>
                     <div className="shrink-0 text-right">
                       <div className="text-xs font-mono text-gold-500/90">
-                        {fmtTDCAI(tx.value)} <span className="text-gold-500/60">tDCAI</span>
+                        {formatTDCAI(tx.value)} <span className="text-gold-500/60">tDCAI</span>
                       </div>
                       <div className="text-[10px] font-mono text-gold-500/35">{String(tx.value ?? '0')} wei</div>
-                      <div className="mt-2 text-[10px] font-mono text-gold-500/60">fee {fmtTDCAI(tx.fee?.value ?? tx.fee ?? '0')} tDCAI</div>
+                      <div className="mt-2 text-[10px] font-mono text-gold-500/60">fee {formatTDCAI(tx.fee?.value ?? tx.fee ?? '0')} tDCAI</div>
                       <div className="text-[10px] font-mono text-gold-500/35">{String(tx.fee?.value ?? tx.fee ?? '0')} wei</div>
                       <div className="text-[10px] font-mono text-gold-500/50">conf {tx.confirmations ?? '--'}</div>
                     </div>

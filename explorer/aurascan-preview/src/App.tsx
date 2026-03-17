@@ -2,7 +2,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 
-import { navigateTo, copyToClipboard } from './lib/appUtils';
+import { navigateTo, copyToClipboard, pushRoute, parseAppPath, type AppView } from './lib/appUtils';
+import { shortHash } from './lib/formatters';
 import CursorFollower from './components/CursorFollower';
 import Header from './components/Header';
 import Hero from './components/Hero';
@@ -17,7 +18,7 @@ import TokenView from './views/TokenView';
 import DashboardView from './views/DashboardView';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'blocks' | 'txs' | 'block' | 'tx' | 'address' | 'tokens' | 'token' | 'dashboard'>('home');
+  const [currentView, setCurrentView] = useState<AppView>('home');
   const [selectedBlock, setSelectedBlock] = useState<any>(null);
   const [selectedTxHash, setSelectedTxHash] = useState<string | null>(null);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
@@ -26,62 +27,12 @@ export default function App() {
   // Basic client-side routing for direct URL opens (/tx/<hash>, /block/<height>)
   useEffect(() => {
     const applyRouteFromPath = () => {
-      try {
-        const path = window.location.pathname || '/';
-
-        if (path === '/blocks' || path === '/blocks/') {
-          setCurrentView('blocks');
-          return;
-        }
-
-        if (path === '/txs' || path === '/txs/') {
-          setCurrentView('txs');
-          return;
-        }
-
-        if (path === '/tokens' || path === '/tokens/') {
-          setCurrentView('tokens');
-          return;
-        }
-
-        if (path === '/dashboard' || path === '/dashboard/') {
-          setCurrentView('dashboard');
-          return;
-        }
-
-        const txm = path.match(/^\/tx\/(0x[0-9a-fA-F]{64})/);
-        if (txm) {
-          setSelectedTxHash(txm[1]);
-          setCurrentView('tx');
-          return;
-        }
-
-        const bm = path.match(/^\/block\/(\d+)/);
-        if (bm) {
-          const h = parseInt(bm[1], 10);
-          if (Number.isFinite(h)) {
-            setSelectedBlock({ height: h });
-            setCurrentView('block');
-            return;
-          }
-        }
-
-        const tokm = path.match(/^\/token\/(0x[0-9a-fA-F]{40})/);
-        if (tokm) {
-          setSelectedTokenAddress(tokm[1]);
-          setCurrentView('token');
-          return;
-        }
-
-        const am = path.match(/^\/address\/(0x[0-9a-fA-F]{40})/);
-        if (am) {
-          setSelectedAddress(am[1]);
-          setCurrentView('address');
-          return;
-        }
-      } catch {}
-      // default
-      setCurrentView('home');
+      const route = parseAppPath();
+      setCurrentView(route.view);
+      if (route.blockHeight != null) setSelectedBlock({ height: route.blockHeight });
+      if (route.txHash) setSelectedTxHash(route.txHash);
+      if (route.address) setSelectedAddress(route.address);
+      if (route.tokenAddress) setSelectedTokenAddress(route.tokenAddress);
     };
 
     applyRouteFromPath();
@@ -164,7 +115,7 @@ export default function App() {
           }
         } catch {}
 
-        const short = (addr: string) => (addr ? (addr.slice(0, 6) + '…' + addr.slice(-4)) : '--');
+        const short = (addr: string) => shortHash(addr, 6, 4);
 
         const fmt = (weiLike: any, dp = 2) => {
           try {
@@ -268,7 +219,7 @@ export default function App() {
               for (const k of ks) signerByHeightRef.current[Number(k)] = updates[Number(k)];
 
               if (!cancelled) {
-                const short = (addr: string) => (addr ? addr.slice(0, 6) + '…' + addr.slice(-4) : '--');
+                const short = (addr: string) => shortHash(addr, 6, 4);
                 setBlocks((prev) =>
                   (prev || []).map((b: any) => {
                     const s = updates[Number(b.height)];
@@ -358,33 +309,25 @@ export default function App() {
   const handleViewBlock = (block: any) => {
     setSelectedBlock(block);
     setCurrentView('block');
-    try {
-      if (block?.height != null) window.history.pushState({ view: 'block', height: block.height }, '', `/block/${block.height}`);
-    } catch {}
+    pushRoute(`/block/${block.height}`, { view: 'block', height: block.height });
   };
 
   const handleViewTx = (hash: string) => {
     setSelectedTxHash(hash);
     setCurrentView('tx');
-    try {
-      window.history.pushState({ view: 'tx', hash }, '', `/tx/${hash}`);
-    } catch {}
+    pushRoute(`/tx/${hash}`, { view: 'tx', hash });
   };
 
   const handleViewAddress = (addr: string) => {
     setSelectedAddress(addr);
     setCurrentView('address');
-    try {
-      window.history.pushState({ view: 'address', address: addr }, '', `/address/${addr}`);
-    } catch {}
+    pushRoute(`/address/${addr}`, { view: 'address', address: addr });
   };
 
   const handleViewToken = (addr: string) => {
     setSelectedTokenAddress(addr);
     setCurrentView('token');
-    try {
-      window.history.pushState({ view: 'token', address: addr }, '', `/token/${addr}`);
-    } catch {}
+    pushRoute(`/token/${addr}`, { view: 'token', address: addr });
   };
 
   return (
@@ -410,11 +353,11 @@ export default function App() {
       
       <Header
         active={currentView}
-        onHome={() => { setCurrentView('home'); try { window.history.pushState({ view: 'home' }, '', '/'); } catch {} }}
-        onBlocks={() => { setCurrentView('blocks'); try { window.history.pushState({ view: 'blocks' }, '', '/blocks'); } catch {} }}
-        onTxs={() => { setCurrentView('txs'); try { window.history.pushState({ view: 'txs' }, '', '/txs'); } catch {} }}
-        onTokens={() => { setCurrentView('tokens'); try { window.history.pushState({ view: 'tokens' }, '', '/tokens'); } catch {} }}
-        onDashboard={() => { setCurrentView('dashboard'); try { window.history.pushState({ view: 'dashboard' }, '', '/dashboard'); } catch {} }}
+        onHome={() => { setCurrentView('home'); pushRoute('/', { view: 'home' }); }}
+        onBlocks={() => { setCurrentView('blocks'); pushRoute('/blocks', { view: 'blocks' }); }}
+        onTxs={() => { setCurrentView('txs'); pushRoute('/txs', { view: 'txs' }); }}
+        onTokens={() => { setCurrentView('tokens'); pushRoute('/tokens', { view: 'tokens' }); }}
+        onDashboard={() => { setCurrentView('dashboard'); pushRoute('/dashboard', { view: 'dashboard' }); }}
       />
       
       <AnimatePresence mode="wait">
@@ -656,13 +599,13 @@ export default function App() {
           </motion.main>
         ) : currentView === 'blocks' ? (
           <BlocksListView
-            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
+            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); pushRoute(`/block/${h}`, { view: 'block', height: h }); }}
           />
         ) : currentView === 'txs' ? (
           <TxsListView
-            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
+            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); pushRoute(`/tx/${h}`, { view: 'tx', hash: h }); }}
             onViewAddress={(a: string) => handleViewAddress(a)}
-            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
+            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); pushRoute(`/block/${h}`, { view: 'block', height: h }); }}
           />
         ) : currentView === 'tokens' ? (
           <TokensView
@@ -674,23 +617,23 @@ export default function App() {
         ) : currentView === 'token' ? (
           <TokenView
             address={selectedTokenAddress || ''}
-            onBack={() => { setCurrentView('tokens'); try { window.history.pushState({ view: 'tokens' }, '', '/tokens'); } catch {} }}
-            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
-            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
+            onBack={() => { setCurrentView('tokens'); pushRoute('/tokens', { view: 'tokens' }); }}
+            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); pushRoute(`/tx/${h}`, { view: 'tx', hash: h }); }}
+            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); pushRoute(`/block/${h}`, { view: 'block', height: h }); }}
             onViewAddress={(a: string) => handleViewAddress(a)}
           />
         ) : currentView === 'tx' ? (
           <TxView
             hash={selectedTxHash || ''}
             onBack={() => setCurrentView('home')}
-            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
+            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); pushRoute(`/block/${h}`, { view: 'block', height: h }); }}
             onViewAddress={(a: string) => handleViewAddress(a)}
           />
         ) : currentView === 'address' ? (
           <AddressView
             address={selectedAddress || ''}
             onBack={() => setCurrentView('home')}
-            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
+            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); pushRoute(`/tx/${h}`, { view: 'tx', hash: h }); }}
             onViewAddress={(a: string) => handleViewAddress(a)}
             onViewToken={(a: string) => handleViewToken(a)}
           />
@@ -698,7 +641,7 @@ export default function App() {
           <BlockView 
             block={selectedBlock} 
             onBack={() => setCurrentView('home')} 
-            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
+            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); pushRoute(`/tx/${h}`, { view: 'tx', hash: h }); }}
             onViewAddress={(a: string) => handleViewAddress(a)}
           />
         )}
