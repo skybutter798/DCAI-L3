@@ -2,6 +2,11 @@
 
 This produces `measurements.json` (input for `score-to-claims.mjs`).
 
+Additional live-monitoring/admin snapshots synced from infra-1:
+- `admin-api.mjs` — foundation/admin HTTP API for cap changes, topups, and API-key lifecycle
+- `gen-dashboard.mjs` — static admin dashboard generator
+- `health-scan.mjs` — writes `/var/www/html/admin/health.json`
+
 ## Why a probe runner?
 
 The chain contract only verifies Merkle proofs. The "competition" rules (uptime/latency/etc) live off-chain.

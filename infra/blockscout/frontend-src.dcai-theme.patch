@@ -1,0 +1,133 @@
+diff --git a/toolkit/theme/foundations/animations.ts b/toolkit/theme/foundations/animations.ts
+index 2b3a6fb..f8982ad 100644
+--- a/toolkit/theme/foundations/animations.ts
++++ b/toolkit/theme/foundations/animations.ts
+@@ -17,4 +17,21 @@ export const keyframes = {
+       transform: 'translateX(100%)',
+     },
+   },
++  dcaiScan: {
++    from: { transform: 'translateY(-15%)' },
++    to: { transform: 'translateY(15%)' },
++  },
++  dcaiGlow: {
++    '0%': { opacity: 0.08 },
++    '50%': { opacity: 0.18 },
++    '100%': { opacity: 0.08 },
++  },
++  dcaiGridMove: {
++    from: { backgroundPosition: '0 0' },
++    to: { backgroundPosition: '0 60px' },
++  },
++  dcaiScanline: {
++    from: { top: '-100vh' },
++    to: { top: '100vh' },
++  },
+ };
+diff --git a/toolkit/theme/globalCss.ts b/toolkit/theme/globalCss.ts
+index 973b74b..d2ca651 100644
+--- a/toolkit/theme/globalCss.ts
++++ b/toolkit/theme/globalCss.ts
+@@ -21,6 +21,31 @@ const globalCss: SystemConfig['globalCss'] = {
+   body: {
+     bg: 'global.body.bg',
+     color: 'global.body.fg',
++    position: 'relative',
++    overflowX: 'hidden',
++    backgroundImage: 'radial-gradient(1200px circle at 20% 20%, rgba(212,175,55,0.12), transparent 55%), radial-gradient(900px circle at 80% 10%, rgba(255, 215, 0, 0.08), transparent 45%), radial-gradient(800px circle at 60% 90%, rgba(245,200,76,0.10), transparent 55%)',
++    backgroundAttachment: 'fixed',
++    '&::before': {
++      content: "''",
++      pointerEvents: 'none',
++      position: 'fixed',
++      inset: 0,
++      zIndex: 0,
++      opacity: 0.45,
++      backgroundImage: 'repeating-linear-gradient(to bottom, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.00) 2px, rgba(255,255,255,0.00) 6px)',
++      mixBlendMode: 'overlay',
++      animation: 'dcaiScan 6s linear infinite',
++    },
++    '&::after': {
++      content: "''",
++      pointerEvents: 'none',
++      position: 'fixed',
++      inset: 0,
++      zIndex: 0,
++      opacity: 0.12,
++      backgroundImage: 'radial-gradient(circle at 50% 50%, rgba(245,200,76,0.10), transparent 60%)',
++      animation: 'dcaiGlow 4s ease-in-out infinite',
++    },
+     WebkitTapHighlightColor: 'transparent',
+     fontVariantLigatures: 'no-contextual',
+     focusRingStyle: 'hidden',
+@@ -57,6 +82,41 @@ const globalCss: SystemConfig['globalCss'] = {
+   ...scrollbar,
+   ...entity,
+   ...addressEntity,
++  '.dcai-hex': {
++    position: 'fixed',
++    inset: 0,
++    pointerEvents: 'none',
++    zIndex: 0,
++    backgroundImage: 'url(data:image/svg+xml,%3Csvg%20width%3D%2724%27%20height%3D%2740%27%20viewBox%3D%270%200%2024%2040%27%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%3E%3Cpath%20d%3D%27M0%2040c5.523%200%2010-4.477%2010-10V10C10%204.477%205.523%200%200%200h24c-5.523%200-10%204.477-10%2010v20c0%205.523%204.477%2010%2010%2010H0z%27%20fill%3D%27%23ffd700%27%20fill-opacity%3D%270.02%27%20fill-rule%3D%27evenodd%27/%3E%3C/svg%3E)',
++  },
++  '.dcai-grid': {
++    position: 'fixed',
++    bottom: '-20vh',
++    left: '-50vw',
++    width: '200vw',
++    height: '70vh',
++    pointerEvents: 'none',
++    zIndex: 0,
++    backgroundImage: 'linear-gradient(to right, rgba(255, 215, 0, 0.10) 1px, transparent 1px), linear-gradient(to top, rgba(255, 215, 0, 0.10) 1px, transparent 1px)',
++    backgroundSize: '60px 60px',
++    transform: 'perspective(1000px) rotateX(75deg)',
++    transformOrigin: 'top',
++    animation: 'dcaiGridMove 3s linear infinite',
++    WebkitMaskImage: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%)',
++    maskImage: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%)',
++    opacity: 0.55,
++  },
++  '.dcai-scanline': {
++    width: '100%',
++    height: '100vh',
++    position: 'fixed',
++    left: 0,
++    top: '-100vh',
++    pointerEvents: 'none',
++    zIndex: 2,
++    background: 'linear-gradient(to bottom, transparent, rgba(255, 215, 0, 0.06), transparent)',
++    animation: 'dcaiScanline 8s linear infinite',
++  },
+ };
+ 
+ export default globalCss;
+diff --git a/ui/shared/layout/Layout.tsx b/ui/shared/layout/Layout.tsx
+index 0b66027..00becc4 100644
+--- a/ui/shared/layout/Layout.tsx
++++ b/ui/shared/layout/Layout.tsx
+@@ -13,6 +13,9 @@ import * as Layout from './components';
+ const LayoutDefault = ({ children }: Props) => {
+   return (
+     <Layout.Root content={ children }>
++      <div className="dcai-hex" />
++      <div className="dcai-grid" />
++      <div className="dcai-scanline" />
+       <Layout.Container>
+         <Layout.TopRow/>
+         <Layout.NavBar/>
+diff --git a/ui/shared/layout/components/Container.tsx b/ui/shared/layout/components/Container.tsx
+index 6fd7a73..951aa7f 100644
+--- a/ui/shared/layout/components/Container.tsx
++++ b/ui/shared/layout/components/Container.tsx
+@@ -12,7 +12,9 @@ const Container = ({ children, className }: Props) => {
+       className={ className }
+       minWidth={{ base: '100vw', lg: 'fit-content' }}
+       m="0 auto"
+-      bgColor="bg.primary"
++      bgColor="transparent"
++      position="relative"
++      zIndex="1"
+     >
+       { children }
+     </Box>
