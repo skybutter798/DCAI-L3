@@ -1,0 +1,24 @@
+services:
+  frontend_cyber:
+    build:
+      context: ./frontend-src
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_HOST: "139.180.140.143:4000"
+      NEXT_PUBLIC_API_PROTOCOL: "http"
+      NEXT_PUBLIC_API_BASE_PATH: "/"
+      NEXT_PUBLIC_API_WEBSOCKET_PROTOCOL: "ws"
+      NEXT_PUBLIC_APP_HOST: "139.180.140.143"
+      NEXT_PUBLIC_APP_PROTOCOL: "http"
+      NEXT_PUBLIC_NETWORK_NAME: "DCAI Testnet"
+      NEXT_PUBLIC_NETWORK_SHORT_NAME: "DCAI"
+      NEXT_PUBLIC_NETWORK_ID: "18441"
+      NEXT_PUBLIC_NETWORK_CURRENCY_NAME: "tDCAI"
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: "tDCAI"
+      NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS: "18"
+      NEXT_PUBLIC_IS_TESTNET: "true"
+      NEXT_PUBLIC_COLOR_THEME_DEFAULT: "dark"
+      NEXT_PUBLIC_COLOR_THEME_OVERRIDES: '{"bg":{"primary":{"_dark":{"value":"#0B0B10"}}},"text":{"primary":{"_dark":{"value":"#F5E6AA"}},"secondary":{"_dark":{"value":"#C8B56A"}}},"hover":{"_dark":{"value":"#F5C84C"}},"button":{"primary":{"_dark":{"value":"#D4AF37"},"text":{"_dark":{"value":"#0B0B10"}}}},"link":{"primary":{"_dark":{"value":"#F5C84C"}}},"graph":{"line":{"_dark":{"value":"#F5C84C"}}}}'
+    ports:
+      - "3003:3000"

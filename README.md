@@ -48,8 +48,9 @@ Unified entry (nginx): `http://139.180.140.143`
 
 - `genesis/genesis.json` — genesis used across nodes
 - `infra/nginx/` — nginx unified entry config (Explorer + Faucet + RPC proxy)
-- `infra/blockscout/` — Blockscout docker-compose
+- `infra/blockscout/` — Blockscout docker-compose + cyber theme override snapshot
 - `infra/faucet/` — Faucet docker-compose + source
+- `infra/geth/` — sanitized live runtime snapshots reconstructed from running geth containers
 - `scripts/dcai-sweep.sh` — signer fee sweep script (installed on signers via cron)
 - `docs/` — operational notes (WIP)
 
