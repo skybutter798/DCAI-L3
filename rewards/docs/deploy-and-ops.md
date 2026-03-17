@@ -28,7 +28,7 @@ This is a private-chain, admin-driven rewards system.
 2. Generate merkle root + proofs
    - Use `rewards/scripts/build-epoch.mjs`
 3. Publish on-chain (two options):
-   - **Hardhat**: `hardhat run scripts/publish-epoch.js`
+   - **Hardhat**: `hardhat run scripts/publish-epoch.mjs`
    - **Ethers-only (recommended for ops servers)**: `rewards/scripts/publish-onchain.mjs`
 
 Constraints:

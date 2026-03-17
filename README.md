@@ -41,7 +41,7 @@ Unified entry (nginx): `http://139.180.140.143`
   - rpc-2: `207.148.72.238` (8545/8546)
 - **Infra**
   - infra-1: `139.180.140.143` (nginx, Blockscout backend+frontend, faucet)
-- **Indexer node (reserved)**
+- **Indexer / archive node**
   - indexer-node-1: `139.180.141.226`
 
 ## Repo layout
@@ -53,6 +53,12 @@ Unified entry (nginx): `http://139.180.140.143`
 - `infra/geth/` — sanitized live runtime snapshots reconstructed from running geth containers
 - `infra/apikey/` — RPC API-key usage collector snapshot
 - `scripts/dcai-sweep.sh` — signer fee sweep script (installed on signers via cron)
+- `docs/` — operational notes (WIP)
+
+## Operations quickstart
+
+See `docs/runbook.md`.
+/dcai-sweep.sh` — signer fee sweep script (installed on signers via cron)
 - `docs/` — operational notes (WIP)
 
 ## Operations quickstart

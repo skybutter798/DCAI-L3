@@ -98,6 +98,7 @@ On infra-1:
 - Publisher directory: `/opt/dcai/rewards/`
 - Cron: runs every 10 minutes
 - Entry script: `/opt/dcai/rewards/publish-epoch.sh`
+- Optional full-pipeline script: `/opt/dcai/rewards/run-epoch.sh`
 - Input template: `/opt/dcai/rewards/inbox/claims.json`
 - Output/merkle file: `/opt/dcai/rewards/out/epoch-out.json`
 - Public proof mirror: `/var/www/html/rewards/latest.json` (served at `http://<infra>/rewards/latest.json`)
@@ -117,6 +118,14 @@ On contributor box (example):
 Each signer runs `/usr/local/bin/dcai-sweep.sh` every 5 minutes via cron.
 
 - Keeps a small reserve on the signer address
+- Sweeps remaining funds to Treasury
+
+If you need to disable temporarily:
+
+```bash
+crontab -l | grep -v dcai-sweep.sh | crontab -
+```
+s
 - Sweeps remaining funds to Treasury
 
 If you need to disable temporarily:
