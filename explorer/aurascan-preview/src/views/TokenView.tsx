@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 import DetailRow from '../components/DetailRow';
 import { shortHash, formatUnits } from '../lib/formatters';
+import useTokenDetails from '../hooks/useTokenDetails';
 
 const TokenView = ({
   address,
@@ -17,7 +18,7 @@ const TokenView = ({
   onViewBlock: (h: number) => void,
   onViewAddress: (a: string) => void,
 }) => {
-  const [info, setInfo] = useState<any>(null);
+  const { info, loading } = useTokenDetails(address);
   const [tab, setTab] = useState<'overview' | 'transfers' | 'holders'>('transfers');
 
   const [transfers, setTransfers] = useState<any[] | null>(null);
@@ -29,28 +30,6 @@ const TokenView = ({
   const [holdersPageParams, setHoldersPageParams] = useState<any | null>(null);
   const [holdersNextParams, setHoldersNextParams] = useState<any | null>(null);
   const [holdersPrevStack, setHoldersPrevStack] = useState<any[]>([]);
-
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/v2/tokens/${address}`, { cache: 'no-store' });
-        const j = await res.json();
-        if (!cancelled) setInfo(j);
-      } catch {
-        if (!cancelled) setInfo(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    if (address) load();
-    return () => {
-      cancelled = true;
-    };
-  }, [address]);
 
   // Reset pagination caches when switching tokens
   useEffect(() => {

@@ -3,66 +3,23 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 import { copyToClipboard } from '../lib/appUtils';
 import { formatTDCAI } from '../lib/formatters';
+import { useAddressDetails, useAddressTokenMeta, useSmartContractDetails } from '../hooks/useAddressDetails';
 import DetailRow from '../components/DetailRow';
 
 const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: { address: string, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void, onViewToken: (a: string) => void }) => {
-  const [info, setInfo] = useState<any>(null);
-  const [tokenMeta, setTokenMeta] = useState<any>(null);
-  const [tokenMetaLoading, setTokenMetaLoading] = useState<boolean>(false);
+  const { info } = useAddressDetails(address);
+  const { tokenMeta, tokenMetaLoading } = useAddressTokenMeta(address);
   const [tab, setTab] = useState<'overview' | 'contract' | 'txs' | 'tokens'>('overview');
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [addrTxs, setAddrTxs] = useState<any[] | null>(null);
   const [addrTxsLoading, setAddrTxsLoading] = useState<boolean>(false);
 
-  const [contract, setContract] = useState<any>(null);
-  const [contractLoading, setContractLoading] = useState<boolean>(false);
+  const { contract, contractLoading } = useSmartContractDetails(address, tab === 'contract' && !!info?.is_contract);
 
   useEffect(() => {
     // reset per-address caches
     setAddrTxs(null);
-    setContract(null);
     setTab('overview');
-  }, [address]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/v2/addresses/${address}`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setInfo(j);
-      } catch {}
-    };
-    load();
-    return () => { cancelled = true; };
-  }, [address]);
-
-  // Detect if this address is a token contract (so we can suggest the Token page)
-  useEffect(() => {
-    let cancelled = false;
-    const loadTokenMeta = async () => {
-      try {
-        setTokenMetaLoading(true);
-        const res = await fetch(`/api/v2/tokens/${address}`, { cache: 'no-store' });
-        if (res.status === 404) {
-          if (!cancelled) setTokenMeta(null);
-          return;
-        }
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled && j?.address) setTokenMeta(j);
-      } catch {
-        if (!cancelled) setTokenMeta(null);
-      } finally {
-        if (!cancelled) setTokenMetaLoading(false);
-      }
-    };
-
-    setTokenMeta(null);
-    loadTokenMeta();
-
-    return () => { cancelled = true; };
   }, [address]);
 
   useEffect(() => {
@@ -80,23 +37,6 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
     if (tab === 'txs' && addrTxs == null && !addrTxsLoading) loadAddrTxs();
     return () => { cancelled = true; };
   }, [tab, address]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadContract = async () => {
-      try {
-        setContractLoading(true);
-        const res = await fetch(`/api/v2/smart-contracts/${address}`, { cache: 'no-store' });
-        if (res.status === 404) { if (!cancelled) setContract(null); return; }
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setContract(j);
-      } catch {}
-      finally { if (!cancelled) setContractLoading(false); }
-    };
-    if (tab === 'contract' && info?.is_contract && contract == null && !contractLoading) loadContract();
-    return () => { cancelled = true; };
-  }, [tab, address, info?.is_contract]);
 
   const copy = async (label: string, value: string) => {
     const ok = await copyToClipboard(value);

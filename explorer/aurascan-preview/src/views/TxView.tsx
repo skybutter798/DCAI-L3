@@ -3,11 +3,11 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
 import { copyToClipboard } from '../lib/appUtils';
 import { shortHash, formatTDCAI } from '../lib/formatters';
+import useTxDetails from '../hooks/useTxDetails';
 import DetailRow from '../components/DetailRow';
 
 const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, onBack: () => void, onViewBlock: (h: number) => void, onViewAddress: (a: string) => void }) => {
-  const [tx, setTx] = useState<any>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const { tx, loading } = useTxDetails(hash);
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [tab, setTab] = useState<'overview' | 'logs' | 'transfers'>('overview');
   const [showInput, setShowInput] = useState<boolean>(false);
@@ -28,24 +28,6 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
     const k = String(topic0).toLowerCase();
     return EVENT_SIGS[k] || 'Unknown event';
   };
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/v2/transactions/${hash}`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const data = await res.json();
-        if (!cancelled) setTx(data);
-      } catch {
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => { cancelled = true; };
-  }, [hash]);
 
   // Reset tab payloads when hash changes
   useEffect(() => {
