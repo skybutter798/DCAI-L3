@@ -1,7 +1,13 @@
-import { motion, AnimatePresence } from 'motion/react';
-import { useState, useEffect, useRef } from 'react';
-import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
+import { motion } from 'motion/react';
+import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
+
+import DashboardHeader from './dashboard/DashboardHeader';
+import WalletPanel from './dashboard/WalletPanel';
+import StakePanel from './dashboard/StakePanel';
+import TierCards from './dashboard/TierCards';
+import ApplyPanel from './dashboard/ApplyPanel';
+import EndpointsPanel from './dashboard/EndpointsPanel';
 
 const DashboardView = () => {
   const STAKE_CONTRACT = '0x54ff6c64f1f7915a3aD54743aDd92b32412B06BC';
@@ -271,294 +277,53 @@ const DashboardView = () => {
       exit={{ opacity: 0, y: -20 }}
       className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
     >
-      <div className="mb-6 flex items-center gap-4">
-        <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/20 shadow-[0_0_20px_rgba(0,240,255,0.10)]">
-          <Code2 className="w-8 h-8 text-cyan-400" />
-        </div>
-        <div className="min-w-0">
-          <h1 className="text-3xl md:text-4xl font-black tracking-widest">API <span className="glow-text-cyan text-cyan-300">DASHBOARD</span></h1>
-          <div className="mt-2 text-xs font-mono text-gold-500/60">Stake tDCAI → Apply → Admin approve → Get API key</div>
-        </div>
-      </div>
+      <DashboardHeader />
 
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30 mb-8">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-xs font-mono text-gold-500/50">WALLET</div>
-            <div className="mt-1 text-sm font-mono text-cyan-200/90 break-all">{addr || '-- not connected --'}</div>
-            <div className="mt-1 text-[10px] font-mono text-gold-500/40">chainId {chainId ?? '--'} · stake contract {STAKE_CONTRACT}</div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={connect} className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">CONNECT</button>
-            <button disabled={!addr} onClick={refreshStake} className={`px-3 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-gold-500/20 text-gold-500/80 hover:border-cyan-500/40 hover:text-cyan-300' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>REFRESH</button>
-          </div>
-        </div>
+      <WalletPanel
+        addr={addr}
+        chainId={chainId}
+        stakeContract={STAKE_CONTRACT}
+        err={err}
+        busy={busy}
+        onConnect={connect}
+        onRefresh={refreshStake}
+      />
 
-        {err ? <div className="mt-3 text-[11px] font-mono text-rose-300">{err}</div> : null}
-        {busy ? <div className="mt-3 text-[11px] font-mono text-gold-500/60">{busy}</div> : null}
-      </div>
+      <StakePanel
+        addr={addr}
+        stakeTierLabel={stakeTierLabel}
+        stakeAmount={stakeAmount}
+        requestedAtSec={requestedAtSec}
+        cooldownLeftSec={cooldownLeftSec}
+        onRequestUnstake={requestUnstake}
+        onWithdraw={withdrawStake}
+      />
 
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30 mb-8">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="text-xs font-mono text-gold-500/50">CURRENT STAKE</div>
-            <div className="mt-1 text-sm font-mono text-cyan-200/90">tier <span className="text-cyan-300">{stakeTierLabel}</span> · amount <span className="text-cyan-300">{stakeAmount}</span> tDCAI</div>
-            <div className="mt-1 text-[10px] font-mono text-gold-500/40">unstake cooldown: 24h</div>
-            {requestedAtSec > 0 ? (
-              <div className="mt-2 text-[10px] font-mono text-gold-500/60">
-                requestedAt {requestedAtSec} · withdraw {(cooldownLeftSec <= 0) ? <span className="text-emerald-400">available now</span> : <span className="text-yellow-400">in {Math.max(0, cooldownLeftSec)}s</span>}
-              </div>
-            ) : (
-              <div className="mt-2 text-[10px] font-mono text-gold-500/50">No unstake requested.</div>
-            )}
-          </div>
+      <TierCards
+        addr={addr}
+        tiers={tiers}
+        onStakeSelect={(tierKey) => {
+          setTier(tierKey);
+          doStake(tierKey);
+        }}
+      />
 
-          <div className="flex gap-2">
-            <button
-              disabled={!addr || stakeTierLabel === 'none' || requestedAtSec > 0}
-              onClick={requestUnstake}
-              className={`px-3 py-2 rounded-lg border text-xs font-mono ${(!addr || stakeTierLabel === 'none' || requestedAtSec > 0) ? 'border-gold-500/10 text-gold-500/30 cursor-not-allowed' : 'border-rose-500/30 text-rose-300 hover:border-rose-400/70'}`}
-            >
-              REQUEST UNSTAKE
-            </button>
-            <button
-              disabled={!addr || requestedAtSec <= 0 || cooldownLeftSec > 0}
-              onClick={withdrawStake}
-              className={`px-3 py-2 rounded-lg border text-xs font-mono ${(!addr || requestedAtSec <= 0 || cooldownLeftSec > 0) ? 'border-gold-500/10 text-gold-500/30 cursor-not-allowed' : 'border-emerald-500/30 text-emerald-300 hover:border-emerald-400/70'}`}
-            >
-              WITHDRAW
-            </button>
-          </div>
-        </div>
+      <ApplyPanel
+        tier={tier}
+        note={note}
+        addr={addr}
+        lastReq={lastReq}
+        setNote={setNote}
+        onRequestApiKey={requestApiKey}
+        onRevealMyKeys={revealMyKeys}
+      />
 
-        <div className="mt-3 text-[10px] font-mono text-gold-500/40">
-          If you withdraw, we can revoke your API key (policy: key valid while staked). For now revoke is manual from /admin.
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        {(['basic','pro','ultra'] as const).map((k) => (
-          <div key={k} className="rounded-2xl border border-gold-500/15 bg-dark-900/40 p-5">
-            <div className="text-xs font-mono text-gold-500/50">{tiers[k].label.toUpperCase()}</div>
-            <div className="mt-2 text-lg font-mono text-cyan-200/90">Stake {tiers[k].stake} tDCAI</div>
-            <div className="mt-1 text-[10px] font-mono text-gold-500/40">limit {tiers[k].rate} · burst {tiers[k].burst}</div>
-            <button
-              disabled={!addr}
-              onClick={() => { setTier(k); doStake(k); }}
-              className={`mt-4 w-full px-3 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-cyan-500/20 text-cyan-300 hover:border-cyan-400/60' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}
-            >
-              STAKE & SELECT
-            </button>
-          </div>
-        ))}
-      </div>
-
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30 mb-8">
-        <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-gold-500">
-          <CheckCircle2 className="w-5 h-5" /> APPLY
-        </h2>
-        <div className="mt-2 text-xs font-mono text-gold-500/60">Selected tier: <span className="text-cyan-300">{tier}</span></div>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Tell us your intended usage (optional)…"
-          className="mt-4 w-full min-h-[90px] bg-dark-900/50 border border-gold-500/15 rounded-xl p-3 text-xs font-mono text-gold-500/80 outline-none"
-        />
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button disabled={!addr} onClick={requestApiKey} className={`px-4 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-cyan-500/20 text-cyan-300 hover:border-cyan-400/60' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>SUBMIT REQUEST</button>
-          <button disabled={!addr} onClick={revealMyKeys} className={`px-4 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-gold-500/20 text-gold-500/80 hover:border-cyan-500/40 hover:text-cyan-300' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>REVEAL MY KEYS</button>
-        </div>
-
-        {lastReq ? (
-          <pre className="mt-4 text-[10px] font-mono text-gold-500/60 whitespace-pre-wrap break-all">{JSON.stringify(lastReq, null, 2)}</pre>
-        ) : null}
-      </div>
-
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
-            <Code2 className="w-5 h-5" /> ENDPOINTS
-          </h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setDocsTab('dapp')}
-              className={`px-3 py-1.5 rounded-lg border text-[10px] font-mono ${docsTab === 'dapp' ? 'border-cyan-400/60 text-cyan-200 bg-cyan-500/10' : 'border-gold-500/15 text-gold-500/60 hover:border-cyan-500/30 hover:text-cyan-300'}`}
-            >
-              DAPP (ethers/viem)
-            </button>
-            <button
-              onClick={() => setDocsTab('ops')}
-              className={`px-3 py-1.5 rounded-lg border text-[10px] font-mono ${docsTab === 'ops' ? 'border-cyan-400/60 text-cyan-200 bg-cyan-500/10' : 'border-gold-500/15 text-gold-500/60 hover:border-cyan-500/30 hover:text-cyan-300'}`}
-            >
-              OPS (curl/cast/web3.py)
-            </button>
-          </div>
-        </div>
-        <div className="mt-2 text-[10px] font-mono text-gold-500/50">chainId <span className="text-cyan-300">18441</span> · native <span className="text-cyan-300">tDCAI</span></div>
-
-        <details className="mt-4 rounded-xl border border-gold-500/10 bg-dark-950/30 p-4">
-          <summary className="cursor-pointer select-none text-[10px] font-mono text-gold-500/60 hover:text-cyan-300">
-            Supported Ethereum JSON-RPC methods
-          </summary>
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px] font-mono">
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">web3_*</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>web3_clientVersion</div>
-                <div>web3_sha3</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">net_*</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>net_version</div>
-                <div>net_listening</div>
-                <div>net_peerCount</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (node status / basics)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_protocolVersion</div>
-                <div>eth_syncing</div>
-                <div>eth_coinbase</div>
-                <div>eth_mining</div>
-                <div>eth_hashrate</div>
-                <div>eth_gasPrice</div>
-                <div>eth_feeHistory</div>
-                <div>eth_maxPriorityFeePerGas</div>
-                <div>eth_accounts</div>
-                <div>eth_chainId</div>
-                <div>eth_blockNumber</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (state / account / contract)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_getBalance</div>
-                <div>eth_getStorageAt</div>
-                <div>eth_getTransactionCount</div>
-                <div>eth_getCode</div>
-                <div>eth_call</div>
-                <div>eth_estimateGas</div>
-                <div>eth_createAccessList</div>
-                <div>eth_getProof</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (blocks / tx lookup)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_getBlockByHash</div>
-                <div>eth_getBlockByNumber</div>
-                <div>eth_getTransactionByHash</div>
-                <div>eth_getTransactionReceipt</div>
-                <div>eth_getTransactionByBlockHashAndIndex</div>
-                <div>eth_getTransactionByBlockNumberAndIndex</div>
-                <div>eth_getBlockTransactionCountByHash</div>
-                <div>eth_getBlockTransactionCountByNumber</div>
-                <div>eth_getUncleCountByBlockHash</div>
-                <div>eth_getUncleCountByBlockNumber</div>
-                <div>eth_getUncleByBlockHashAndIndex</div>
-                <div>eth_getUncleByBlockNumberAndIndex</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (logs / filters)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_newFilter</div>
-                <div>eth_newBlockFilter</div>
-                <div>eth_newPendingTransactionFilter</div>
-                <div>eth_uninstallFilter</div>
-                <div>eth_getFilterChanges</div>
-                <div>eth_getFilterLogs</div>
-                <div>eth_getLogs</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (send / sign / mining work)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_sign</div>
-                <div>eth_signTransaction</div>
-                <div>eth_sendTransaction</div>
-                <div>eth_sendRawTransaction</div>
-                <div>eth_getWork</div>
-                <div>eth_submitWork</div>
-                <div>eth_submitHashrate</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3 md:col-span-2">
-              <div className="text-gold-500/50">WS only (PubSub)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_subscribe (newHeads / logs / newPendingTransactions)</div>
-                <div>eth_unsubscribe</div>
-              </div>
-              <div className="mt-3 text-[10px] text-gold-500/40">
-                Not public by default: <span className="text-gold-500/50">debug_*, admin_*, personal_*, txpool_*, trace_*</span>
-              </div>
-            </div>
-          </div>
-        </details>
-
-        {revealedKeys && revealedKeys.length ? (
-          <div className="mt-4 space-y-3">
-            {revealedKeys.map((k, i) => {
-              const e = endpointFor(String(k.tier), String(k.key));
-              return (
-                <div key={i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
-                  <div className="text-xs font-mono text-gold-500/60">tier <span className="text-cyan-300">{k.tier}</span></div>
-                  <div className="mt-1 text-[11px] font-mono text-gold-500/70 break-all">key {k.key}</div>
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/50">
-                    usage today <span className="text-cyan-200/90">{k?.usage?.today ?? '--'}</span> · last 5m <span className="text-cyan-200/90">{k?.usage?.last5m ?? '--'}</span> · last 60m <span className="text-cyan-200/90">{k?.usage?.last60m ?? '--'}</span>
-                    <div className="mt-1 text-gold-500/50">
-                      status (60m)
-                      {' '}2xx <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['2xx'] ?? 0}</span>
-                      {' '}· 4xx <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['4xx'] ?? 0}</span>
-                      {' '}· 5xx <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['5xx'] ?? 0}</span>
-                      {' '}· 401 <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['401'] ?? 0}</span>
-                      {' '}· 429 <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['429'] ?? 0}</span>
-                    </div>
-                    <div className="mt-1 text-gold-500/50">
-                      latency (60m)
-                      {' '}p50 <span className="text-cyan-200/90">{k?.usage?.latencyLast60m?.p50Ms ?? '--'}</span>ms
-                      {' '}· p95 <span className="text-cyan-200/90">{k?.usage?.latencyLast60m?.p95Ms ?? '--'}</span>ms
-                    </div>
-                    <div className="mt-1 text-gold-500/50">
-                      top methods (60m)
-                      {Array.isArray(k?.usage?.topMethodsLast60m) && k.usage.topMethodsLast60m.length ? (
-                        <span className="text-cyan-200/90">{' '}{k.usage.topMethodsLast60m.slice(0, 6).map((m: any) => `${m.method}:${m.count}`).join(' · ')}</span>
-                      ) : (
-                        <span className="text-cyan-200/90"> --</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-3 text-[11px] font-mono text-gold-500/60">HTTP</div>
-                  <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.http}</div>
-                  <div className="mt-2 text-[11px] font-mono text-gold-500/60">WS</div>
-                  <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.ws}</div>
-
-                  <div className="mt-4 rounded-xl border border-gold-500/10 bg-dark-950/30 p-3">
-                    <div className="text-[10px] font-mono text-gold-500/50">Quickstart ({docsTab})</div>
-                    <pre className="mt-2 text-[10px] font-mono text-gold-500/70 whitespace-pre-wrap break-all">
-{docsTab === 'dapp'
-? `// ethers v6\nimport { ethers } from \"ethers\";\n\nconst provider = new ethers.JsonRpcProvider(\"${e.http}\", 18441);\nconsole.log(await provider.getBlockNumber());\n\n// viem\nimport { createPublicClient, http } from \"viem\";\n\nconst client = createPublicClient({\n  chain: { id: 18441, name: \"DCAI L3\", nativeCurrency: { name: \"tDCAI\", symbol: \"tDCAI\", decimals: 18 }, rpcUrls: { default: { http: [\"${e.http}\"] } } },\n  transport: http(\"${e.http}\"),\n});\nconsole.log(await client.getBlockNumber());`
-: `# curl (eth_chainId)\ncurl -s \"${e.http}\" \\\n  -H 'content-type: application/json' \\\n  --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}'\n\n# Foundry cast\ncast chain-id --rpc-url \"${e.http}\"\ncast block-number --rpc-url \"${e.http}\"\n\n# web3.py\nfrom web3 import Web3\nw3 = Web3(Web3.HTTPProvider(\"${e.http}\"))\nprint(w3.eth.chain_id)\nprint(w3.eth.block_number)`}
-                    </pre>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="mt-4 text-xs font-mono text-gold-500/60">No active keys revealed yet.</div>
-        )}
-      </div>
+      <EndpointsPanel
+        docsTab={docsTab}
+        revealedKeys={revealedKeys}
+        setDocsTab={setDocsTab}
+        endpointFor={endpointFor}
+      />
     </motion.div>
   );
 };
