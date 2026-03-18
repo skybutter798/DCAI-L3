@@ -1,12 +1,12 @@
 import http from 'node:http';
 import fs from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { ethers } from 'ethers';
 
 // --- Existing monitor/admin config ---
 const CONFIG_PATH = '/opt/dcai/rewards/monitor/config.json';
-const RPC_URL = 'http://139.180.140.143/rpc/REPLACE_WITH_LEGACY_KEY_32HEX/';
+const RPC_URL = process.env.RPC_URL || 'http://139.180.188.61:8545';
 const DISTRIBUTOR_ADDR = '0x728f2C63b9A0ff0918F5ffB3D4C2d004107476B7';
 const PRIVATE_KEY = process.env.FOUNDATION_KEY;
 
@@ -17,6 +17,7 @@ const STORE_DIR = '/opt/dcai/apikey';
 const REQ_PATH = STORE_DIR + '/requests.json';
 const KEYS_PATH = STORE_DIR + '/keys.json';
 const USAGE_PATH = STORE_DIR + '/usage.json';
+const BASIC_AUTH_FILE = '/etc/nginx/.htpasswd-dcai-admin';
 
 const TIERS = {
   basic: { enum: 1, requiredEther: '1000', keyFile: '/etc/nginx/rpc_keys_basic.conf' },
@@ -79,20 +80,7 @@ function usageForKey(key) {
   const u = loadJson(USAGE_PATH, { keys: {} });
   const rec = u?.keys?.[key];
   if (!rec) {
-    const latencyTodayHist = latByDay[day] || {};
-  const latencyLast60mHist = mergeLatencyLastN(60);
-
-  const latencyToday = {
-    p50Ms: percentileFromLatencyHist(latencyTodayHist, 0.50),
-    p95Ms: percentileFromLatencyHist(latencyTodayHist, 0.95),
-  };
-
-  const latencyLast60m = {
-    p50Ms: percentileFromLatencyHist(latencyLast60mHist, 0.50),
-    p95Ms: percentileFromLatencyHist(latencyLast60mHist, 0.95),
-  };
-
-  return {
+    return {
       today: 0,
       last5m: 0,
       last60m: 0,
@@ -102,6 +90,8 @@ function usageForKey(key) {
       statusLast60m: {},
       topMethodsToday: [],
       topMethodsLast60m: [],
+      latencyToday: { p50Ms: null, p95Ms: null },
+      latencyLast60m: { p50Ms: null, p95Ms: null },
     };
   }
 
@@ -243,6 +233,79 @@ function genKey32() {
   return randomBytes(16).toString('hex'); // 32 hex chars
 }
 
+function tierLabelFromEnum(tierEnum) {
+  switch (Number(tierEnum)) {
+    case 1: return 'basic';
+    case 2: return 'pro';
+    case 3: return 'ultra';
+    default: return 'none';
+  }
+}
+
+async function getStakeWatchRows(provider) {
+  if (!STAKE_CONTRACT) throw new Error('STAKE_CONTRACT not set');
+
+  const keys = loadJson(KEYS_PATH, []);
+  const requests = loadJson(REQ_PATH, []);
+  const addresses = Array.from(new Set([
+    ...keys.map((k) => String(k.address || '').toLowerCase()),
+    ...requests.map((r) => String(r.address || '').toLowerCase()),
+  ].filter(Boolean)));
+
+  const c = new ethers.Contract(STAKE_CONTRACT, stakeAbi, provider);
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  const rows = await Promise.all(addresses.map(async (address) => {
+    const addr = ethers.getAddress(address);
+    const [tierEnum, stakeWei, requestedAt] = await c.getStake(addr);
+    const requestedAtSec = Number(requestedAt.toString());
+    const cooldownEndsSec = requestedAtSec > 0 ? requestedAtSec + 86400 : 0;
+    const cooldownLeftSec = cooldownEndsSec > 0 ? Math.max(0, cooldownEndsSec - nowSec) : 0;
+
+    const activeKeys = keys
+      .filter((k) => String(k.address || '').toLowerCase() === address && k.active)
+      .map((k) => ({ keyPrefix: String(k.key || '').slice(0, 6), tier: k.tier, createdAt: k.createdAt }));
+
+    const recentRequests = requests
+      .filter((r) => String(r.address || '').toLowerCase() === address)
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, 3)
+      .map((r) => ({ id: r.id, tier: r.tier, status: r.status, createdAt: r.createdAt }));
+
+    let unstakeStatus = 'no-stake';
+    if (BigInt(stakeWei.toString()) > 0n) {
+      unstakeStatus = requestedAtSec > 0
+        ? (cooldownLeftSec > 0 ? 'cooldown' : 'withdrawable')
+        : 'staked';
+    }
+
+    return {
+      address: address,
+      tierEnum: Number(tierEnum),
+      tier: tierLabelFromEnum(tierEnum),
+      stakeWei: stakeWei.toString(),
+      stake: ethers.formatEther(stakeWei),
+      requestedAtSec,
+      cooldownEndsSec,
+      cooldownLeftSec,
+      unstakeStatus,
+      activeKeys,
+      activeKeyCount: activeKeys.length,
+      recentRequests,
+    };
+  }));
+
+  rows.sort((a, b) => {
+    const aScore = (a.requestedAtSec > 0 ? 1_000_000_000 : 0) + a.activeKeyCount;
+    const bScore = (b.requestedAtSec > 0 ? 1_000_000_000 : 0) + b.activeKeyCount;
+    if (bScore !== aScore) return bScore - aScore;
+    if (b.requestedAtSec !== a.requestedAtSec) return b.requestedAtSec - a.requestedAtSec;
+    return a.address.localeCompare(b.address);
+  });
+
+  return { nowSec, rows };
+}
+
 async function verifyStake(provider, addr, tierKey) {
   if (!STAKE_CONTRACT) throw new Error('STAKE_CONTRACT not set');
   const t = TIERS[tierKey];
@@ -254,19 +317,6 @@ async function verifyStake(provider, addr, tierKey) {
   const needWei = ethers.parseEther(t.requiredEther);
   const okTier = Number(tierEnum) === t.enum;
   const okAmt = BigInt(stakeWei.toString()) === BigInt(needWei.toString());
-
-  const latencyTodayHist = latByDay[day] || {};
-  const latencyLast60mHist = mergeLatencyLastN(60);
-
-  const latencyToday = {
-    p50Ms: percentileFromLatencyHist(latencyTodayHist, 0.50),
-    p95Ms: percentileFromLatencyHist(latencyTodayHist, 0.95),
-  };
-
-  const latencyLast60m = {
-    p50Ms: percentileFromLatencyHist(latencyLast60mHist, 0.50),
-    p95Ms: percentileFromLatencyHist(latencyLast60mHist, 0.95),
-  };
 
   return { ok: okTier && okAmt, tierEnum: Number(tierEnum), stakeWei: stakeWei.toString(), needWei: needWei.toString() };
 }
@@ -297,6 +347,22 @@ function writeNginxKeyFile(tierKey, keys) {
 function reloadNginx() {
   execSync('nginx -t');
   execSync('nginx -s reload');
+}
+
+function changeAdminPassword(username, currentPassword, newPassword) {
+  if (!username) throw new Error('missing username');
+  if (!currentPassword) throw new Error('missing current password');
+  if (!newPassword || newPassword.length < 8) throw new Error('new password too short');
+  if (!fs.existsSync(BASIC_AUTH_FILE)) throw new Error('basic auth file missing');
+
+  try {
+    execFileSync('htpasswd', ['-vb', BASIC_AUTH_FILE, username, currentPassword], { stdio: 'ignore' });
+  } catch {
+    throw new Error('current password incorrect');
+  }
+
+  execFileSync('htpasswd', ['-bB', BASIC_AUTH_FILE, username, newPassword], { stdio: 'ignore' });
+  reloadNginx();
 }
 
 function getTodayDayIdUTC() {
@@ -405,6 +471,27 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ---------- Basic auth: change admin password ----------
+  if ((pathname === '/api/auth/change-password' || pathname === '/auth/change-password') && req.method === 'POST') {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const username = String(body?.username || '').trim();
+      const currentPassword = String(body?.currentPassword || '');
+      const newPassword = String(body?.newPassword || '');
+      const confirmPassword = String(body?.confirmPassword || '');
+
+      if (!username) return sendJson(res, 400, { error: 'missing username' });
+      if (!currentPassword) return sendJson(res, 400, { error: 'missing current password' });
+      if (!newPassword) return sendJson(res, 400, { error: 'missing new password' });
+      if (confirmPassword && newPassword !== confirmPassword) return sendJson(res, 400, { error: 'password confirmation mismatch' });
+
+      changeAdminPassword(username, currentPassword, newPassword);
+      return sendJson(res, 200, { ok: true, username });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message || String(e) });
+    }
+  }
+
   // ---------- Admin: list requests ----------
   if ((pathname === '/api/apikey/requests' || pathname === '/apikey/requests') && req.method === 'GET') {
     if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
@@ -464,9 +551,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = JSON.parse(await readBody(req));
       const key = String(body?.key || '').trim();
-      if (!key) return sendJson(res, 400, { error: 'missing key' });
+      const id = String(body?.id || '').trim();
+      if (!key && !id) return sendJson(res, 400, { error: 'missing key or id' });
       const keys = loadJson(KEYS_PATH, []);
-      const k = keys.find((x) => x.key === key && x.active);
+      const k = keys.find((x) => x.active && ((key && x.key === key) || (id && String(x.id || '') === id)));
       if (!k) return sendJson(res, 404, { error: 'key not found' });
       k.active = false;
       k.revokedAt = new Date().toISOString();
@@ -475,7 +563,7 @@ const server = http.createServer(async (req, res) => {
       writeNginxKeyFile('pro', keys);
       writeNginxKeyFile('ultra', keys);
       reloadNginx();
-      return sendJson(res, 200, { ok: true });
+      return sendJson(res, 200, { ok: true, id: k.id, keyPrefix: String(k.key || '').slice(0, 6), address: k.address, tier: k.tier });
     } catch (e) {
       return sendJson(res, 500, { error: e.message || String(e) });
     }
@@ -498,6 +586,18 @@ const server = http.createServer(async (req, res) => {
     }
     const u = loadJson(USAGE_PATH, { keys: {} });
     return sendJson(res, 200, { ok: true, usage: u });
+  }
+
+  // ---------- Admin: stake / unstake watch ----------
+  if ((pathname === '/api/stakes' || pathname === '/stakes') && req.method === 'GET') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
+    try {
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const { nowSec, rows } = await getStakeWatchRows(provider);
+      return sendJson(res, 200, { ok: true, nowSec, rows });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || String(e) });
+    }
   }
 
 

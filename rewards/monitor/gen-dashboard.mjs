@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { ethers } from 'ethers';
 
-const RPC_URL = 'http://139.180.140.143/rpc/REPLACE_WITH_LEGACY_KEY_32HEX/';
+const RPC_URL = process.env.RPC_URL || 'http://139.180.188.61:8545';
 const TREASURY_ADDR = '0xae201c3daacd53e4cb305fa91678b16cc7eae43a';
 const DISTRIBUTOR_ADDR = '0x728f2C63b9A0ff0918F5ffB3D4C2d004107476B7';
 
@@ -285,13 +285,17 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
                             <tr class="text-slate-500 text-[9px] font-bold uppercase tracking-widest bg-slate-900/50">
                                 <th class="px-6 py-4">Operator</th>
                                 <th class="px-6 py-4">RPC Stats</th>
-                                <th class="px-6 py-4 text-right">Sync</th>
+                                <th class="px-6 py-4 text-right">Indexer (shared infra)</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-800/50">
                             ${measurements.operators.map((op, idx) => {
                                 const conf = config.operators.find(c => c.operator.toLowerCase() === op.operator.toLowerCase());
                                 const rpcIp = conf?.endpoints?.rpc?.match(/\\d+\\.\\d+\\.\\d+\\.\\d+/) || 'N/A';
+                                const rpcUptime = op.metrics?.rpc?.uptime ?? 0;
+                                const rpcP95 = op.metrics?.rpc?.p95_ms;
+                                const indexerEnabled = !!conf?.services?.indexer;
+                                const indexerLag = op.metrics?.indexer?.lag_blocks;
                                 return `
                             <tr class="hover:bg-slate-800/20 transition-colors">
                                 <td class="px-6 py-5">
@@ -300,12 +304,13 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
                                     <div class="text-[8px] text-slate-600 font-mono mt-0.5 cursor-pointer hover:text-yellow-500" onclick="copyText('${op.operator}')">${op.operator.slice(0,20)}...</div>
                                 </td>
                                 <td class="px-6 py-5">
-                                    <div class="${op.metrics.rpc.uptime > 0.9 ? 'text-emerald-400' : 'text-rose-500'} text-xs font-bold">${(op.metrics.rpc.uptime * 100).toFixed(1)}%</div>
-                                    <div class="text-[9px] text-slate-500 font-mono">${op.metrics.rpc.p95_ms.toFixed(0)}ms</div>
+                                    <div class="${rpcUptime > 0.9 ? 'text-emerald-400' : 'text-rose-500'} text-xs font-bold">${(rpcUptime * 100).toFixed(1)}%</div>
+                                    <div class="text-[9px] text-slate-500 font-mono">${rpcP95 == null ? '--' : rpcP95.toFixed(0) + 'ms'}</div>
                                 </td>
                                 <td class="px-6 py-5 text-right">
-                                    <div class="text-xs font-bold ${op.metrics.indexer.lag_blocks < 5 ? 'text-emerald-400' : 'text-amber-500'}">-${op.metrics.indexer.lag_blocks}</div>
-                                    <div class="text-[9px] text-slate-600 uppercase font-bold">Blocks</div>
+                                    ${indexerEnabled && indexerLag != null
+                                      ? `<div class="text-xs font-bold ${indexerLag < 5 ? 'text-emerald-400' : 'text-amber-500'}">-${indexerLag}</div><div class="text-[9px] text-slate-600 uppercase font-bold">Blocks</div>`
+                                      : `<div class="text-xs font-bold text-slate-500">OFF</div><div class="text-[9px] text-slate-600 uppercase font-bold">Disabled</div>`}
                                 </td>
                             </tr>
                             `;}).join('')}
@@ -367,7 +372,7 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
                 <div class="flex flex-wrap gap-2 items-center">
                     <input id="adminTokenInput" type="password" placeholder="Admin token" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono w-[320px]" />
                     <button onclick="saveAdminToken()" class="bg-slate-800 hover:bg-slate-700 text-[10px] font-bold px-3 py-2 rounded-2xl border border-slate-700 transition">SAVE</button>
-                    <button onclick="loadApiKeyRequests()" class="bg-yellow-500 text-black text-[10px] font-bold px-3 py-2 rounded-2xl hover:bg-yellow-400 transition">REFRESH</button>
+                    <button onclick="refreshAdminData()" class="bg-yellow-500 text-black text-[10px] font-bold px-3 py-2 rounded-2xl hover:bg-yellow-400 transition">REFRESH</button>
                 </div>
             </div>
 
@@ -382,6 +387,37 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
                     <button onclick="loadApiKeyKeys()" class="bg-slate-800 hover:bg-slate-700 text-[10px] font-bold px-3 py-2 rounded-2xl border border-slate-700 transition">LIST KEYS</button>
                 </div>
                 <div id="apiKeyKeysTable" class="mt-3"></div>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-slate-800/50">
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                    <div>
+                        <div class="text-xs font-bold text-slate-300">Stake / Unstake Watch</div>
+                        <div class="text-[10px] font-mono text-slate-500 mt-1">Tracked addresses from API-key requests + issued keys. Shows unstake cooldown / withdrawable state.</div>
+                    </div>
+                    <div class="flex gap-2 items-center">
+                        <button onclick="loadStakeWatch()" class="bg-slate-800 hover:bg-slate-700 text-[10px] font-bold px-3 py-2 rounded-2xl border border-slate-700 transition">LOAD STAKES</button>
+                    </div>
+                </div>
+                <div id="stakeWatchStatus" class="mt-3 text-[10px] font-mono text-slate-500"></div>
+                <div id="stakeWatchTable" class="mt-3"></div>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-slate-800/50">
+                <div>
+                    <div class="text-xs font-bold text-slate-300">Admin Login Password</div>
+                    <div class="text-[10px] font-mono text-slate-500 mt-1">Updates the Basic Auth password used for /admin/ and /admin/api/.</div>
+                </div>
+                <div class="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
+                    <input id="adminBasicUserInput" value="dcaiadmin" placeholder="Username" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono" />
+                    <input id="adminBasicCurrentInput" type="password" placeholder="Current password" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono" />
+                    <input id="adminBasicNewInput" type="password" placeholder="New password" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono" />
+                    <input id="adminBasicConfirmInput" type="password" placeholder="Confirm new password" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono" />
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2 items-center">
+                    <button onclick="changeAdminPassword()" class="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-3 py-2 rounded-2xl border border-emerald-500/20 hover:bg-emerald-500/20 transition">UPDATE LOGIN PASSWORD</button>
+                </div>
+                <div id="adminBasicStatus" class="mt-3 text-[10px] font-mono text-slate-500"></div>
             </div>
         </div>
         <footer class="mt-12 mb-8 text-center">
@@ -619,23 +655,25 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         // init
         try { loadHealth(); } catch (e) {}
         try { updateLabels(); } catch (e) {}
+        try { if (getAdminToken()) { refreshAdminData(); loadApiKeyKeys(); } } catch (e) {}
 
     </script>
 
     <!-- Latest Rewards Modal -->
     <div id="latestRewardsModal" class="fixed inset-0 hidden items-center justify-center bg-black/60 p-4" style="z-index: 9999;">
-      <div class="w-full max-w-2xl bg-slate-950 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden">
-        <div class="p-5 border-b border-slate-800 flex items-center justify-between">
+      <div class="w-full max-w-5xl bg-slate-950 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+        <div class="p-5 border-b border-slate-800 flex items-center justify-between gap-4">
           <div>
             <div class="text-xs text-slate-500 font-bold uppercase tracking-widest">Latest Published Reward</div>
             <div id="latestRewardsTitle" class="text-lg font-mono text-yellow-400 font-bold">--</div>
-            <select id="latestRewardsEpochSelect" class="mt-2 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200"></select>
+            <div id="latestRewardsMeta" class="mt-1 text-[10px] text-slate-500 font-mono">--</div>
+            <select id="latestRewardsEpochSelect" class="mt-3 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200"></select>
           </div>
           <button onclick="closeLatestRewards()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold">Close</button>
         </div>
-        <div class="p-5">
-          <div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3">Distribution</div>
-          <div id="latestRewardsList" class="space-y-2"></div>
+        <div class="p-5 overflow-y-auto">
+          <div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3">Distribution + Score Breakdown</div>
+          <div id="latestRewardsList" class="space-y-4"></div>
           <div class="text-[10px] text-slate-600 mt-4">Tip: click address to copy</div>
         </div>
       </div>
@@ -658,7 +696,72 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         }
       }
 
-      function renderClaimsInto(listEl, claims) {
+      function formatPct(v, digits) {
+        if (v == null || Number.isNaN(Number(v))) return '--';
+        return (Number(v) * 100).toFixed(digits == null ? 2 : digits) + '%';
+      }
+
+      function formatScore(v, digits) {
+        if (v == null || Number.isNaN(Number(v))) return '--';
+        return Number(v).toFixed(digits == null ? 4 : digits);
+      }
+
+      function formatMetricValue(key, value) {
+        if (value == null) return '--';
+        if (key === 'uptime' || key === 'error_rate') return formatPct(value, 2);
+        if (key === 'p95_ms' || key === 'io_p95_ms') return Number(value).toFixed(0) + 'ms';
+        if (key === 'lag_blocks') return Number(value).toFixed(0) + ' blk';
+        if (key === 'regions_ok' || key === 'regions_required') return String(value);
+        return formatScore(value, 4);
+      }
+
+      function renderKeyValueBadges(obj, title) {
+        var entries = Object.entries(obj || {}).filter(function(pair) {
+          return pair[1] != null;
+        });
+        if (!entries.length) return '';
+        return '' +
+          '<div>' +
+            '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2">' + title + '</div>' +
+            '<div class="flex flex-wrap gap-2">' +
+              entries.map(function(pair) {
+                return '<span class="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[10px] font-mono text-slate-300">' + pair[0] + ': ' + formatMetricValue(pair[0], pair[1]) + '</span>';
+              }).join('') +
+            '</div>' +
+          '</div>';
+      }
+
+      function renderServiceBreakdown(name, svc) {
+        if (!svc) return '';
+        var enabled = !!svc.enabled;
+        var stateClass = enabled ? 'text-emerald-400' : 'text-slate-500';
+        var stateText = enabled ? 'ENABLED' : 'DISABLED';
+        var note = '';
+        if (name === 'RPC Route') note = 'Live probe against operator-specific RPC route.';
+        if (name === 'Shared Infra Indexer') note = 'Single shared Blockscout probe on infra, not per-operator indexer attribution.';
+        if (name === 'Storage Health Endpoint') note = 'Simple HTTP health endpoint check only.';
+        if (name === 'Multi-route Check') note = 'Configured route-availability check, not direct proof of separate regional deployments.';
+        return '' +
+          '<div class="p-3 rounded-2xl bg-slate-900/70 border border-slate-800">' +
+            '<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">' +
+              '<div>' +
+                '<div class="text-xs font-bold text-white uppercase tracking-widest">' + name + '</div>' +
+                '<div class="text-[10px] font-mono ' + stateClass + '">' + stateText + ' · weight ' + (svc.weight == null ? '--' : svc.weight) + '</div>' +
+                (note ? ('<div class="text-[10px] text-slate-500 mt-1 max-w-xl">' + note + '</div>') : '') +
+              '</div>' +
+              '<div class="text-left md:text-right">' +
+                '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Raw / Weighted</div>' +
+                '<div class="text-xs font-mono text-slate-200">' + formatScore(svc.rawScore, 6) + ' / <span class="text-yellow-400">' + formatScore(svc.weightedScore, 6) + '</span></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="grid grid-cols-1 lg:grid-cols-2 gap-3">' +
+              renderKeyValueBadges(svc.metrics, 'Metrics') +
+              renderKeyValueBadges(svc.factors, 'Factors') +
+            '</div>' +
+          '</div>';
+      }
+
+      function renderClaimsInto(listEl, claims, epochData) {
         if (!claims.length) {
           listEl.innerHTML = '<div class="text-sm text-slate-400">No archived claims for this epoch yet.</div>';
           return;
@@ -668,18 +771,39 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
           var op = c.operator || '--';
           var amtWei = c.amountWei || '--';
           var amtTDCAI = weiTo18(amtWei);
+          var sharePct = formatPct(c.sharePct, 4);
+          var totalScore = formatScore(c.totalScore, 6);
+          var breakdown = c.breakdown || {};
           return '' +
-            '<div class="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-yellow-500/30 transition">' +
-              '<div class="flex items-center justify-between gap-3">' +
+            '<div class="p-4 rounded-3xl bg-slate-900/60 border border-slate-800 hover:border-yellow-500/30 transition">' +
+              '<div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">' +
                 '<div class="min-w-0">' +
                   '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Operator</div>' +
-                  '<div class="text-xs font-mono text-slate-200 truncate cursor-pointer" data-copy="' + op + '">' + op + '</div>' +
+                  '<div class="text-sm font-mono text-slate-200 break-all cursor-pointer" data-copy="' + op + '">' + op + '</div>' +
                 '</div>' +
-                '<div class="text-right">' +
-                  '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Amount</div>' +
-                  '<div class="text-xs font-mono text-yellow-400 font-bold">' + amtTDCAI + ' tDCAI</div>' +
-                  '<div class="text-[10px] font-mono text-slate-500">wei: ' + amtWei + '</div>' +
+                '<div class="grid grid-cols-1 md:grid-cols-3 gap-3 lg:min-w-[420px]">' +
+                  '<div class="p-3 rounded-2xl bg-slate-950 border border-slate-800">' +
+                    '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Amount</div>' +
+                    '<div class="text-sm font-mono text-yellow-400 font-bold">' + amtTDCAI + ' tDCAI</div>' +
+                    '<div class="text-[10px] font-mono text-slate-500 break-all">wei: ' + amtWei + '</div>' +
+                  '</div>' +
+                  '<div class="p-3 rounded-2xl bg-slate-950 border border-slate-800">' +
+                    '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Total Score</div>' +
+                    '<div class="text-sm font-mono text-emerald-400 font-bold">' + totalScore + '</div>' +
+                    '<div class="text-[10px] text-slate-500">sum share basis</div>' +
+                  '</div>' +
+                  '<div class="p-3 rounded-2xl bg-slate-950 border border-slate-800">' +
+                    '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Share</div>' +
+                    '<div class="text-sm font-mono text-blue-400 font-bold">' + sharePct + '</div>' +
+                    '<div class="text-[10px] text-slate-500">of epoch pool</div>' +
+                  '</div>' +
                 '</div>' +
+              '</div>' +
+              '<div class="grid grid-cols-1 xl:grid-cols-2 gap-3">' +
+                renderServiceBreakdown('RPC Route', breakdown.rpc) +
+                renderServiceBreakdown('Shared Infra Indexer', breakdown.indexer) +
+                renderServiceBreakdown('Storage Health Endpoint', breakdown.storage) +
+                renderServiceBreakdown('Multi-route Check', breakdown.multiregion) +
               '</div>' +
             '</div>';
         }).join('');
@@ -695,6 +819,7 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
 
       async function loadEpochIntoModal(epochId) {
         var titleEl = document.getElementById('latestRewardsTitle');
+        var metaEl = document.getElementById('latestRewardsMeta');
         var listEl = document.getElementById('latestRewardsList');
 
         // try load archived epoch json
@@ -711,9 +836,14 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         var eId = data2.epochId || epochId || 'N/A';
         var totalWei = data2.totalWei || '0';
         titleEl.textContent = 'epoch ' + eId + ' · totalWei ' + totalWei;
+        var epochPoolWei = data2.epochPoolWei || data2.totalWei || '0';
+        var dustWei = data2.roundingDustWei || '0';
+        var sumScore = data2.sumScore == null ? '--' : formatScore(data2.sumScore, 6);
+        var cfgHash = data2.configHash ? String(data2.configHash).replace('sha256:', '').slice(0, 12) : '';
+        metaEl.textContent = 'pool ' + weiTo18(epochPoolWei) + ' tDCAI · sumScore ' + sumScore + ' · dust ' + dustWei + ' wei' + (cfgHash ? (' · cfg ' + cfgHash) : '');
 
         var claims = Array.isArray(data2.claims) ? data2.claims : [];
-        renderClaimsInto(listEl, claims);
+        renderClaimsInto(listEl, claims, data2);
       }
 
       function openLatestRewards() {
@@ -767,6 +897,9 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         if (v) localStorage.setItem('dcai_admin_token', v);
         const st = document.getElementById('apiKeyReqStatus');
         if (st) st.textContent = v ? 'Admin token saved locally (this browser).' : 'Admin token empty.';
+        if (v) {
+          try { refreshAdminData(); loadApiKeyKeys(); } catch (e) {}
+        }
       }
 
       async function adminFetch(path, opts) {
@@ -775,6 +908,38 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         const o = opts || {};
         o.headers = Object.assign({ 'X-Admin-Token': token }, (o.headers || {}));
         return await fetch(API_URL + path, o);
+      }
+
+      async function changeAdminPassword() {
+        const st = document.getElementById('adminBasicStatus');
+        const username = (document.getElementById('adminBasicUserInput')?.value || '').trim();
+        const currentPassword = document.getElementById('adminBasicCurrentInput')?.value || '';
+        const newPassword = document.getElementById('adminBasicNewInput')?.value || '';
+        const confirmPassword = document.getElementById('adminBasicConfirmInput')?.value || '';
+
+        if (!username) return (st.textContent = 'Username required.');
+        if (!currentPassword) return (st.textContent = 'Current password required.');
+        if (!newPassword) return (st.textContent = 'New password required.');
+        if (newPassword !== confirmPassword) return (st.textContent = 'Password confirmation mismatch.');
+
+        st.textContent = 'Updating login password…';
+        try {
+          const r = await fetch(API_URL + '/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, currentPassword, newPassword, confirmPassword })
+          });
+          const d = await r.json();
+          if (!r.ok || !d.ok) throw new Error(d.error || 'update failed');
+          st.textContent = 'Login password updated. Use the new password on your next login.';
+          try {
+            document.getElementById('adminBasicCurrentInput').value = '';
+            document.getElementById('adminBasicNewInput').value = '';
+            document.getElementById('adminBasicConfirmInput').value = '';
+          } catch (e) {}
+        } catch (e) {
+          st.textContent = 'Password update failed: ' + (e?.message || e);
+        }
       }
 
       function renderApiKeyRequests(reqs) {
@@ -854,7 +1019,8 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
           if (!d.ok) throw new Error(d.error || 'approve failed');
           alert('Approved!\\nTier: ' + d.tier + '\\nAddress: ' + d.address + '\\nAPI Key: ' + d.key);
           if (st) st.textContent = 'Approved ' + id;
-          loadApiKeyRequests();
+          refreshAdminData();
+          loadApiKeyKeys();
         } catch (e) {
           if (st) st.textContent = 'Approve failed: ' + (e?.message || e);
           alert('Approve failed: ' + (e?.message || e));
@@ -881,6 +1047,30 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
           if (st) st.textContent = 'Revoked key.';
           if (input) input.value = '';
           loadApiKeyKeys();
+          loadStakeWatch();
+        } catch (e) {
+          if (st) st.textContent = 'Revoke failed: ' + (e?.message || e);
+          alert('Revoke failed: ' + (e?.message || e));
+        }
+      }
+
+      async function revokeKeyById(id, keyPrefix) {
+        initAdminTokenInput();
+        if (!id) return;
+        if (!confirm('Revoke key ' + (keyPrefix || id) + '? This will remove it from nginx and reload.')) return;
+        const st = document.getElementById('apiKeyReqStatus');
+        if (st) st.textContent = 'Revoking…';
+        try {
+          const r = await adminFetch('/apikey/revoke', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error || 'revoke failed');
+          if (st) st.textContent = 'Revoked ' + (d.keyPrefix || keyPrefix || id) + '.';
+          loadApiKeyKeys();
+          loadStakeWatch();
         } catch (e) {
           if (st) st.textContent = 'Revoke failed: ' + (e?.message || e);
           alert('Revoke failed: ' + (e?.message || e));
@@ -896,7 +1086,7 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         }
         let html = '<div class="overflow-x-auto"><table class="w-full text-left text-[11px]">';
         html += '<thead class="text-slate-500 uppercase tracking-widest text-[10px] bg-slate-900/50"><tr>';
-        html += '<th class="py-2 pr-4">KeyPrefix</th><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Status</th><th class="py-2">Created</th>';
+        html += '<th class="py-2 pr-4">KeyPrefix</th><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Status</th><th class="py-2 pr-4">Created</th><th class="py-2">Action</th>';
         html += '</tr></thead><tbody class="divide-y divide-slate-800/50">';
         for (const k of keys) {
           html += '<tr class="hover:bg-slate-800/20">';
@@ -904,11 +1094,20 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
           html += '<td class="py-2 pr-4 font-mono text-slate-500">' + (k.address ? (k.address.slice(0,10) + '…' + k.address.slice(-6)) : '') + '</td>';
           html += '<td class="py-2 pr-4 text-slate-300 font-bold">' + (k.tier || '') + '</td>';
           html += '<td class="py-2 pr-4 ' + (k.status === 'active' ? 'text-emerald-400' : 'text-slate-500') + ' font-bold">' + (k.status || '') + '</td>';
-          html += '<td class="py-2 text-slate-500">' + String(k.createdAt || '').replace('T',' ').replace('Z','') + '</td>';
+          html += '<td class="py-2 pr-4 text-slate-500">' + String(k.createdAt || '').replace('T',' ').replace('Z','') + '</td>';
+          html += '<td class="py-2">' + (k.status === 'active'
+            ? ('<button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-rose-500/20 hover:bg-rose-500/20" data-revoke-id="' + (k.id || '') + '" data-revoke-prefix="' + (k.keyPrefix || '') + '">REVOKE</button>')
+            : '<span class="text-slate-600 font-mono">-</span>') + '</td>';
           html += '</tr>';
         }
         html += '</tbody></table></div>';
         el.innerHTML = html;
+
+        try {
+          Array.from(el.querySelectorAll('[data-revoke-id]')).forEach(function(b){
+            b.addEventListener('click', function(){ revokeKeyById(b.getAttribute('data-revoke-id'), b.getAttribute('data-revoke-prefix')); });
+          });
+        } catch (e) {}
       }
 
       async function loadApiKeyKeys() {
@@ -922,6 +1121,93 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
           const el = document.getElementById('apiKeyKeysTable');
           if (el) el.innerHTML = '<div class="text-[11px] text-rose-400 font-mono">Load keys failed: ' + (e?.message || e) + '</div>';
         }
+      }
+
+      function renderStakeWatch(rows) {
+        const el = document.getElementById('stakeWatchTable');
+        if (!el) return;
+        if (!Array.isArray(rows) || rows.length === 0) {
+          el.innerHTML = '<div class="text-[11px] text-slate-500 font-mono">No tracked stake addresses.</div>';
+          return;
+        }
+
+        let html = '<div class="overflow-x-auto"><table class="w-full text-left text-[11px]">';
+        html += '<thead class="text-slate-500 uppercase tracking-widest text-[10px] bg-slate-900/50"><tr>';
+        html += '<th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Stake</th><th class="py-2 pr-4">Unstake</th><th class="py-2 pr-4">Requested</th><th class="py-2 pr-4">Active Keys</th><th class="py-2">Hint</th>';
+        html += '</tr></thead><tbody class="divide-y divide-slate-800/50">';
+
+        for (const row of rows) {
+          const addr = row.address || '';
+          const tier = row.tier || 'none';
+          const stake = row.stake || '0';
+          const requestedAtSec = Number(row.requestedAtSec || 0);
+          const cooldownLeftSec = Number(row.cooldownLeftSec || 0);
+          const activeKeys = Array.isArray(row.activeKeys) ? row.activeKeys : [];
+          const keyList = activeKeys.map(function(k){ return (k.keyPrefix || '') + (k.tier ? ('/' + k.tier) : ''); }).join(', ');
+
+          let unstakeLabel = 'STAKED';
+          let unstakeClass = 'text-emerald-400';
+          if (row.unstakeStatus === 'withdrawable') {
+            unstakeLabel = 'WITHDRAWABLE';
+            unstakeClass = 'text-rose-400';
+          } else if (row.unstakeStatus === 'cooldown') {
+            unstakeLabel = 'COOLDOWN ' + Math.max(0, cooldownLeftSec) + 's';
+            unstakeClass = 'text-yellow-400';
+          } else if (row.unstakeStatus === 'no-stake') {
+            unstakeLabel = 'NO STAKE';
+            unstakeClass = 'text-slate-500';
+          }
+
+          let hint = '-';
+          if ((row.unstakeStatus === 'cooldown' || row.unstakeStatus === 'withdrawable') && activeKeys.length > 0) {
+            hint = 'consider revoke';
+          } else if (row.unstakeStatus === 'withdrawable' && activeKeys.length === 0) {
+            hint = 'can withdraw now';
+          } else if (row.unstakeStatus === 'staked' && activeKeys.length > 0) {
+            hint = 'key active while staked';
+          }
+
+          html += '<tr class="hover:bg-slate-800/20">';
+          html += '<td class="py-2 pr-4 font-mono text-yellow-500 cursor-pointer" data-copy="' + addr + '">' + (addr ? (addr.slice(0, 10) + '…' + addr.slice(-6)) : '') + '</td>';
+          html += '<td class="py-2 pr-4 text-slate-300 font-bold uppercase">' + tier + '</td>';
+          html += '<td class="py-2 pr-4 font-mono text-slate-300">' + stake + ' <span class="text-slate-600">tDCAI</span></td>';
+          html += '<td class="py-2 pr-4 font-mono ' + unstakeClass + ' font-bold">' + unstakeLabel + '</td>';
+          html += '<td class="py-2 pr-4 text-slate-500 font-mono">' + (requestedAtSec > 0 ? requestedAtSec : '-') + '</td>';
+          html += '<td class="py-2 pr-4 text-slate-300 font-mono">' + activeKeys.length + (keyList ? (' <span class="text-slate-500">(' + keyList + ')</span>') : '') + '</td>';
+          html += '<td class="py-2 text-slate-500 font-mono">' + hint + '</td>';
+          html += '</tr>';
+        }
+
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
+
+        try {
+          Array.from(el.querySelectorAll('[data-copy]')).forEach(function(x){
+            x.addEventListener('click', function(){ copyText(x.getAttribute('data-copy')); });
+          });
+        } catch (e) {}
+      }
+
+      async function loadStakeWatch() {
+        initAdminTokenInput();
+        const st = document.getElementById('stakeWatchStatus');
+        if (st) st.textContent = 'Loading stake watch…';
+        try {
+          const r = await adminFetch('/stakes', { method: 'GET' });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error || 'failed');
+          renderStakeWatch(d.rows || []);
+          if (st) st.textContent = 'Loaded ' + ((d.rows || []).length) + ' tracked address(es).';
+        } catch (e) {
+          if (st) st.textContent = 'Load failed: ' + (e?.message || e);
+          const el = document.getElementById('stakeWatchTable');
+          if (el) el.innerHTML = '<div class="text-[11px] text-rose-400 font-mono">Load stakes failed: ' + (e?.message || e) + '</div>';
+        }
+      }
+
+      function refreshAdminData() {
+        loadApiKeyRequests();
+        loadStakeWatch();
       }
       document.addEventListener('click', function(e) {
         var modal = document.getElementById('latestRewardsModal');
