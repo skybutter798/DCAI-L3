@@ -370,8 +370,7 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
                     <p class="text-slate-500 text-xs mt-1">Stake-gated requests (manual approve / revoke)</p>
                 </div>
                 <div class="flex flex-wrap gap-2 items-center">
-                    <input id="adminTokenInput" type="password" placeholder="Admin token" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono w-[320px]" />
-                    <button onclick="saveAdminToken()" class="bg-slate-800 hover:bg-slate-700 text-[10px] font-bold px-3 py-2 rounded-2xl border border-slate-700 transition">SAVE</button>
+                    <div class="px-3 py-2 rounded-2xl border border-slate-700 bg-slate-950 text-[10px] font-mono text-slate-400">Signed in via Basic Auth</div>
                     <button onclick="refreshAdminData()" class="bg-yellow-500 text-black text-[10px] font-bold px-3 py-2 rounded-2xl hover:bg-yellow-400 transition">REFRESH</button>
                 </div>
             </div>
@@ -655,7 +654,7 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         // init
         try { loadHealth(); } catch (e) {}
         try { updateLabels(); } catch (e) {}
-        try { if (getAdminToken()) { refreshAdminData(); loadApiKeyKeys(); } } catch (e) {}
+        try { refreshAdminData(); loadApiKeyKeys(); } catch (e) {}
 
     </script>
 
@@ -878,36 +877,8 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
 
 
       // ---------------- API KEY APPROVALS ----------------
-      function initAdminTokenInput() {
-        try {
-          const input = document.getElementById('adminTokenInput');
-          if (input && !input.value) input.value = (localStorage.getItem('dcai_admin_token') || '');
-        } catch (e) {}
-      }
-
-      function getAdminToken() {
-        const input = document.getElementById('adminTokenInput');
-        const v = (input && input.value) ? input.value.trim() : '';
-        return v || (localStorage.getItem('dcai_admin_token') || '');
-      }
-
-      function saveAdminToken() {
-        const input = document.getElementById('adminTokenInput');
-        const v = (input && input.value) ? input.value.trim() : '';
-        if (v) localStorage.setItem('dcai_admin_token', v);
-        const st = document.getElementById('apiKeyReqStatus');
-        if (st) st.textContent = v ? 'Admin token saved locally (this browser).' : 'Admin token empty.';
-        if (v) {
-          try { refreshAdminData(); loadApiKeyKeys(); } catch (e) {}
-        }
-      }
-
       async function adminFetch(path, opts) {
-        const token = getAdminToken();
-        if (!token) throw new Error('Missing admin token');
-        const o = opts || {};
-        o.headers = Object.assign({ 'X-Admin-Token': token }, (o.headers || {}));
-        return await fetch(API_URL + path, o);
+        return await fetch(API_URL + path, (opts || {}));
       }
 
       async function changeAdminPassword() {

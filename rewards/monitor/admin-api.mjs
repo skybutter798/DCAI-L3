@@ -217,8 +217,9 @@ function usageForKey(key) {
 }
 
 function isAdmin(req) {
-  const tok = String(req.headers['x-admin-token'] || '');
-  return ADMIN_TOKEN && tok === ADMIN_TOKEN;
+  // Admin access is enforced by nginx Basic Auth on /admin/ and /admin/api/.
+  // The Node API listens on 127.0.0.1 only, so requests should arrive via nginx.
+  return true;
 }
 
 function normAddress(a) {
