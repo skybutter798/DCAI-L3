@@ -1827,7 +1827,13 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
               const from = tr?.from?.hash || tr?.from || '--';
               const to = tr?.to?.hash || tr?.to || '--';
               const token = tr?.token?.symbol || tr?.token?.name || tr?.token?.address || tr?.token?.hash || '--';
-              const amount = tr?.total?.value || tr?.value || tr?.amount || '--';
+              const tokenType = String(tr?.token?.type || '');
+              const tokenId = tr?.total?.token_id ?? tr?.token_id ?? null;
+              const tokenInstance = tr?.total?.token_instance ?? tr?.token_instance ?? null;
+              const isNft = /721|1155/i.test(tokenType);
+              const amount = isNft
+                ? (tokenId != null ? `NFT #${String(tokenId)}` : 'NFT')
+                : (tr?.total?.value || tr?.value || tr?.amount || '--');
               const direction = (String(from).toLowerCase() === String(tx?.from?.hash || '').toLowerCase()) ? 'OUT' : 'IN';
 
               return (
@@ -1850,6 +1856,9 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
                     <div className="min-w-0">
                       <div className="text-[10px] font-mono text-gold-500/40">{direction} · {token}</div>
                       <div className="mt-1 text-sm font-mono text-cyan-200/90">{String(amount)}</div>
+                      {isNft && tokenInstance?.metadata?.name ? (
+                        <div className="mt-1 text-[10px] font-mono text-gold-500/55">{String(tokenInstance.metadata.name)}</div>
+                      ) : null}
                       <div className="mt-2 text-[11px] font-mono text-gold-500/70">
                         <span className="text-gold-500/40">from</span> {String(from).slice(0, 10)}…{String(from).slice(-6)}
                       </div>
