@@ -78,7 +78,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   background: rgba(255,255,255,.025);
   border: 1px solid var(--line);
 }
-.question-card h3 { font-size: 28px; line-height: 1.35; margin: 8px 0 18px; }
+.question-card h3 { font-size: 28px; line-height: 1.35; margin: 8px 0 10px; }
+.question-text { font-size: 17px; line-height: 1.7; color: var(--muted); margin: 0 0 18px; max-width: 860px; }
 .answer-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .answer { min-width: 120px; }
 .answer.yes { background: linear-gradient(180deg, #66e98b, var(--good)); color: #05210e; }

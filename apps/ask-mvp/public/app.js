@@ -24,6 +24,7 @@ const el = {
   progressBar: document.getElementById('progressBar'),
   progressText: document.getElementById('progressText'),
   questionLabel: document.getElementById('questionLabel'),
+  questionTitle: document.getElementById('questionTitle'),
   questionText: document.getElementById('questionText'),
 };
 
@@ -218,12 +219,14 @@ function renderSurvey() {
   const next = survey.questions.find((q) => q.question_no === survey.nextQuestionNo);
   if (!next) {
     el.questionLabel.textContent = 'Completed';
-    el.questionText.textContent = 'This survey is fully completed.';
+    el.questionTitle.textContent = 'Survey completed';
+    el.questionText.textContent = 'You have answered all 100 questions.';
     return;
   }
 
-  el.questionLabel.textContent = `Question ${next.question_no}`;
-  el.questionText.textContent = next.question_text;
+  el.questionLabel.textContent = `Question ${String(next.question_no).padStart(3, '0')}`;
+  el.questionTitle.textContent = next.question_title || `Question ${String(next.question_no).padStart(3, '0')}`;
+  el.questionText.textContent = next.question_content || 'Lorem ipsum dolor sit amet.';
 }
 
 async function submitAnswer(answer) {
