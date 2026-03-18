@@ -82,6 +82,18 @@ body {
   align-items: center;
   justify-content: center;
   padding: 18px 0 8px;
+  position: relative;
+}
+
+#experience[data-auth="connected"] .hero-stage {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+}
+
+#experience[data-auth="guest"] .hero-stage {
+  position: relative;
 }
 
 .hero-card,
@@ -469,10 +481,16 @@ textarea {
 #experience[data-auth="connected"][data-view="survey"] .hero-stage,
 #experience[data-auth="connected"][data-view="survey"] .dashboard-deck {
   opacity: 0;
-  transform: translateY(18px);
+  transform: translateX(-24px) scale(.985);
   pointer-events: none;
   position: absolute;
   inset: 0;
+}
+
+#experience[data-auth="connected"][data-view="dashboard"] .dashboard-deck,
+#experience[data-auth="connected"][data-view="hub"] .survey-hub,
+#experience[data-auth="connected"][data-view="survey"] .survey-view {
+  animation: softRise .42s cubic-bezier(.2,.8,.2,1);
 }
 
 .question-reveal {
@@ -492,6 +510,11 @@ textarea {
 @keyframes questionReveal {
   0% { opacity: .35; transform: translateY(14px) scale(.985); filter: blur(7px); }
   100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes softRise {
+  0% { opacity: 0; transform: translateY(18px) scale(.985); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @media (max-width: 980px) {
