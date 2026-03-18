@@ -85,11 +85,9 @@ function renderScene() {
 
   const onRightChain = state.config && state.chainId === state.config.chain.chainIdHex;
   el.walletAddress.textContent = state.wallet || 'Not connected';
-  el.walletStatus.textContent = !state.wallet
-    ? 'Disconnected'
-    : onRightChain
-      ? 'Connected on DCAI L3'
-      : 'Connected, wrong network';
+  el.walletStatus.textContent = state.wallet
+    ? `${state.surveys.length} NFT · ${state.surveys.length} survey`
+    : '0 NFT · 0 survey';
 
   el.mintBtn.disabled = !state.wallet || !onRightChain || !state.config?.survey?.contractAddress;
   el.startSurveyCard.hidden = state.surveys.length === 0;
@@ -174,7 +172,7 @@ async function refreshPasses() {
     surveys = await Promise.all(tokenIds.map(async (tokenId) => (await api('survey', { params: { tokenId } })).survey));
   }
 
-  state.surveys = surveys.sort((a, b) => b.tokenId - a.tokenId);
+  state.surveys = surveys.sort((a, b) => a.tokenId - b.tokenId);
   renderPasses(state.surveys);
   renderScene();
   setStatus(state.surveys.length ? 'Wallet ready. Survey passes detected.' : 'Wallet ready. No survey pass yet.');
@@ -188,11 +186,11 @@ function renderPasses(surveys) {
 
   el.passes.innerHTML = surveys.map((survey) => `
     <article class="pass-tile card ${state.activeSurvey?.tokenId === survey.tokenId ? 'active' : ''}">
-      <span class="card-kicker">NFT Pass</span>
-      <h3>Survey Pass #${survey.tokenId}</h3>
-      <p class="feature-copy">Answered ${survey.answeredCount}/${survey.totalQuestions} · ${survey.completedAt ? 'Completed' : 'In progress'}</p>
-      <div class="tile-meta mono">${survey.payerAddress}</div>
-      <button data-open="${survey.tokenId}" class="primary-cta alt">Open Survey</button>
+      <span class="card-kicker">Survey Pass</span>
+      <h3>#${survey.tokenId}</h3>
+      <p class="tile-stat">${survey.answeredCount}/${survey.totalQuestions}</p>
+      <div class="tile-meta">${survey.completedAt ? 'Completed' : 'In progress'}</div>
+      <button data-open="${survey.tokenId}" class="primary-cta alt mini-open">Open</button>
     </article>
   `).join('');
 

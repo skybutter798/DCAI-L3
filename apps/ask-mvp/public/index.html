@@ -33,32 +33,33 @@
     <section class="dashboard-deck">
       <div class="dashboard-grid">
         <article class="feature-card feature-wallet">
-          <span class="card-kicker">Card A</span>
+          <span class="card-kicker">Wallet overview</span>
           <h2>Wallet</h2>
+          <p class="feature-copy compact-copy">Address, network state, and your current collection.</p>
           <div class="metric-stack">
             <div>
               <div class="metric-label">Wallet address</div>
               <div class="metric-value mono" id="walletAddress">Not connected</div>
             </div>
             <div>
-              <div class="metric-label">Wallet status</div>
-              <div class="metric-value" id="walletStatus">Disconnected</div>
+              <div class="metric-label">Collection</div>
+              <div class="metric-value" id="walletStatus">0 NFT · 0 survey</div>
             </div>
           </div>
         </article>
 
         <article class="feature-card feature-mint">
-          <span class="card-kicker">Card B</span>
+          <span class="card-kicker">Mint access pass</span>
           <h2>Mint your pass</h2>
-          <p class="feature-copy">Mint your survey pass at <strong><span id="mintPriceDisplay">1</span> tDCAI</strong> and lock the journey into an NFT.</p>
+          <p class="feature-copy compact-copy">Mint your survey pass at <span id="mintPriceDisplay">1</span> tDCAI and lock the journey into an NFT.</p>
           <button id="mintBtn" class="primary-cta" disabled>Mint Survey Pass</button>
           <p class="micro-info" id="mintHint"></p>
         </article>
 
         <article class="feature-card feature-start" id="startSurveyCard" hidden>
-          <span class="card-kicker">Card C</span>
+          <span class="card-kicker">Survey library</span>
           <h2>Start survey</h2>
-          <p class="feature-copy">Your wallet already holds survey passes. Enter the gallery, pick one, and continue from there.</p>
+          <p class="feature-copy compact-copy">Open your pass collection and pick the survey you want to continue.</p>
           <button id="startSurveyBtn" class="primary-cta alt">Start Survey</button>
         </article>
       </div>
