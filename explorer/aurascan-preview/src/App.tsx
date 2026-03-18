@@ -1411,13 +1411,6 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
         ) : null}
       </AnimatePresence>
 
-      <NftInstanceModal
-        instance={selectedNftInstance}
-        onClose={() => setSelectedNftInstance(null)}
-        onViewToken={(a: string) => onViewToken(a)}
-        onViewAddress={(a: string) => onViewAddress(a)}
-      />
-
       <button
         onClick={onBack}
         className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 font-mono text-sm mb-8 group transition-colors cursor-pointer"
