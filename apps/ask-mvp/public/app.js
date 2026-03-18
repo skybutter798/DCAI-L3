@@ -12,6 +12,7 @@ const el = {
   statusText: document.getElementById('statusText'),
   mintPriceDisplay: document.getElementById('mintPriceDisplay'),
   mintHint: document.getElementById('mintHint'),
+  flowStage: document.getElementById('flowStage'),
   connectBtn: document.getElementById('connectBtn'),
   switchBtn: document.getElementById('switchBtn'),
   mintBtn: document.getElementById('mintBtn'),
@@ -60,6 +61,14 @@ function short(addr) {
 
 function setStatus(text) {
   el.statusText.textContent = text;
+}
+
+function updateFlowStage() {
+  const steps = document.querySelectorAll('[data-flow-step]');
+  let active = 'connect';
+  if (state.wallet) active = 'sign';
+  if (state.surveys.length > 0) active = 'survey';
+  steps.forEach((node) => node.classList.toggle('active', node.dataset.flowStep === active));
 }
 
 async function loadConfig() {
@@ -128,6 +137,7 @@ function renderWallet() {
   } else {
     setStatus('Wallet connected on DCAI L3');
   }
+  updateFlowStage();
 }
 
 async function fetchOnchainTokenIds() {
@@ -144,7 +154,9 @@ async function fetchOnchainTokenIds() {
 
 async function refreshPasses() {
   if (!state.wallet || !state.config) {
+    state.surveys = [];
     renderPasses([]);
+    updateFlowStage();
     return;
   }
 
@@ -157,6 +169,7 @@ async function refreshPasses() {
   }
 
   state.surveys = surveys.sort((a, b) => b.tokenId - a.tokenId);
+  updateFlowStage();
   renderPasses(state.surveys);
 
   const tokenParam = new URLSearchParams(window.location.search).get('tokenId');
@@ -314,6 +327,22 @@ async function init() {
   document.querySelectorAll('.answer').forEach((btn) => {
     btn.addEventListener('click', () => submitAnswer(btn.dataset.answer).catch((err) => setStatus(err.message)));
   });
+
+  if (el.flowStage) {
+    el.flowStage.addEventListener('mousemove', (event) => {
+      const rect = el.flowStage.getBoundingClientRect();
+      const px = ((event.clientX - rect.left) / rect.width - 0.5) * 24;
+      const py = ((event.clientY - rect.top) / rect.height - 0.5) * 24;
+      el.flowStage.style.setProperty('--px', `${px.toFixed(2)}px`);
+      el.flowStage.style.setProperty('--py', `${py.toFixed(2)}px`);
+    });
+    el.flowStage.addEventListener('mouseleave', () => {
+      el.flowStage.style.setProperty('--px', '0px');
+      el.flowStage.style.setProperty('--py', '0px');
+    });
+  }
+
+  updateFlowStage();
 
   if (window.ethereum) {
     window.ethereum.on('accountsChanged', (accounts) => {
