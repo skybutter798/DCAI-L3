@@ -395,30 +395,30 @@ textarea {
 .admin-help { font-size: 14px; color: var(--muted); line-height: 1.75; }
 .hero.card { margin-top: 12px; }
 
-.experience[data-auth="connected"][data-view="dashboard"] .hero-stage {
+#experience[data-auth="connected"][data-view="dashboard"] .hero-stage {
   opacity: 0;
   transform: translateX(-180px) scale(.92);
   filter: blur(8px);
   pointer-events: none;
 }
 
-.experience[data-auth="connected"][data-view="dashboard"] .dashboard-deck {
+#experience[data-auth="connected"][data-view="dashboard"] .dashboard-deck {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
 }
 
-.experience[data-auth="connected"][data-view="hub"] .survey-hub,
-.experience[data-auth="connected"][data-view="survey"] .survey-view {
+#experience[data-auth="connected"][data-view="hub"] .survey-hub,
+#experience[data-auth="connected"][data-view="survey"] .survey-view {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
 }
 
-.experience[data-auth="connected"][data-view="hub"] .hero-stage,
-.experience[data-auth="connected"][data-view="hub"] .dashboard-deck,
-.experience[data-auth="connected"][data-view="survey"] .hero-stage,
-.experience[data-auth="connected"][data-view="survey"] .dashboard-deck {
+#experience[data-auth="connected"][data-view="hub"] .hero-stage,
+#experience[data-auth="connected"][data-view="hub"] .dashboard-deck,
+#experience[data-auth="connected"][data-view="survey"] .hero-stage,
+#experience[data-auth="connected"][data-view="survey"] .dashboard-deck {
   opacity: 0;
   transform: translateY(18px);
   pointer-events: none;
