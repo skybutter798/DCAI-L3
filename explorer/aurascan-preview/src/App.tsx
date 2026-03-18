@@ -1411,6 +1411,13 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
         ) : null}
       </AnimatePresence>
 
+      <NftInstanceModal
+        instance={selectedNftInstance}
+        onClose={() => setSelectedNftInstance(null)}
+        onViewToken={(a: string) => onViewToken(a)}
+        onViewAddress={(a: string) => onViewAddress(a)}
+      />
+
       <button
         onClick={onBack}
         className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 font-mono text-sm mb-8 group transition-colors cursor-pointer"
@@ -1875,6 +1882,110 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
 };
 
 
+
+const NftInstanceModal = ({
+  instance,
+  onClose,
+  onViewToken,
+  onViewAddress,
+}: {
+  instance: any | null,
+  onClose: () => void,
+  onViewToken?: (a: string) => void,
+  onViewAddress?: (a: string) => void,
+}) => {
+  if (!instance) return null;
+  const traits = Array.isArray(instance?.metadata?.attributes) ? instance.metadata.attributes : [];
+  const tokenAddr = String(instance?.token?.address || '').trim();
+  const owner = String(instance?.owner?.hash || '').trim();
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-md flex items-center justify-center p-4"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 18, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 18, scale: 0.98 }}
+          transition={{ duration: 0.22 }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-full max-w-4xl rounded-2xl border border-cyan-500/20 bg-dark-900/90 shadow-[0_0_40px_rgba(0,240,255,0.12)] overflow-hidden"
+        >
+          <div className="flex items-center justify-between p-4 border-b border-cyan-500/15">
+            <div>
+              <div className="text-[10px] font-mono text-gold-500/45 tracking-widest">NFT INSTANCE</div>
+              <div className="text-lg font-mono text-cyan-300">{String(instance?.metadata?.name || `NFT #${instance?.id || '--'}`)}</div>
+            </div>
+            <button onClick={onClose} className="w-10 h-10 rounded-full border border-cyan-500/20 text-cyan-300 inline-flex items-center justify-center hover:border-cyan-400/60">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-0">
+            <div className="bg-black/30 p-4 border-r border-cyan-500/10">
+              <div className="rounded-2xl overflow-hidden border border-gold-500/10 bg-dark-900/60">
+                {instance?.image_url ? (
+                  <img src={String(instance.image_url)} alt={String(instance?.metadata?.name || instance?.id || 'NFT')} className="w-full aspect-square object-cover" />
+                ) : (
+                  <div className="aspect-square flex items-center justify-center text-xs font-mono text-gold-500/40">NO IMAGE</div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+                <div className="rounded-xl border border-cyan-500/15 bg-dark-800/60 p-4">
+                  <div className="text-gold-500/45">TOKEN ID</div>
+                  <div className="mt-1 text-cyan-300">#{String(instance?.id || '--')}</div>
+                </div>
+                <div className="rounded-xl border border-cyan-500/15 bg-dark-800/60 p-4">
+                  <div className="text-gold-500/45">TOKEN TYPE</div>
+                  <div className="mt-1 text-cyan-300">{String(instance?.token_type || instance?.token?.type || '--')}</div>
+                </div>
+                <div className="rounded-xl border border-cyan-500/15 bg-dark-800/60 p-4 md:col-span-2">
+                  <div className="text-gold-500/45">OWNER</div>
+                  {owner && onViewAddress ? (
+                    <button onClick={() => onViewAddress(owner)} className="mt-1 text-left text-cyan-300 hover:text-cyan-200 break-all underline decoration-cyan-500/30 hover:decoration-cyan-400/60">{owner}</button>
+                  ) : (
+                    <div className="mt-1 text-cyan-300 break-all">{owner || '--'}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <div className="text-xs font-mono text-gold-500/55 tracking-widest">TRAITS</div>
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {traits.length ? traits.map((trait: any, i: number) => (
+                    <div key={i} className="rounded-xl border border-gold-500/12 bg-dark-800/50 p-3">
+                      <div className="text-[10px] font-mono text-gold-500/45">{String(trait?.trait_type || 'TRAIT')}</div>
+                      <div className="mt-1 text-sm font-mono text-cyan-300 break-words">{String(trait?.value ?? '--')}</div>
+                    </div>
+                  )) : (
+                    <div className="text-xs font-mono text-gold-500/45">No traits.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-5 flex items-center gap-2 flex-wrap">
+                {tokenAddr && onViewToken ? (
+                  <button onClick={() => onViewToken(tokenAddr)} className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">OPEN TOKEN</button>
+                ) : null}
+                {instance?.external_app_url ? (
+                  <a href={String(instance.external_app_url)} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-lg border border-gold-500/20 text-gold-400 text-xs font-mono hover:border-cyan-500/40 hover:text-cyan-300">EXTERNAL</a>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+};
+
 const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: { address: string, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void, onViewToken: (a: string) => void }) => {
   const [info, setInfo] = useState<any>(null);
   const [tokenMeta, setTokenMeta] = useState<any>(null);
@@ -1887,6 +1998,7 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
   const [heldTokensLoading, setHeldTokensLoading] = useState<boolean>(false);
   const [nftCollections, setNftCollections] = useState<any[] | null>(null);
   const [nftCollectionsLoading, setNftCollectionsLoading] = useState<boolean>(false);
+  const [selectedNftInstance, setSelectedNftInstance] = useState<any | null>(null);
 
   const [contract, setContract] = useState<any>(null);
   const [contractLoading, setContractLoading] = useState<boolean>(false);
@@ -2054,6 +2166,13 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      <NftInstanceModal
+        instance={selectedNftInstance}
+        onClose={() => setSelectedNftInstance(null)}
+        onViewToken={(a: string) => onViewToken(a)}
+        onViewAddress={(a: string) => onViewAddress(a)}
+      />
 
       <button
         onClick={onBack}
@@ -2362,7 +2481,7 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-3">
                       {instances.slice(0, 4).map((inst: any) => (
-                        <div key={String(inst?.id)} className="rounded-lg border border-gold-500/10 bg-black/20 overflow-hidden">
+                        <button type="button" key={String(inst?.id)} onClick={() => setSelectedNftInstance({ ...inst, token })} className="rounded-lg border border-gold-500/10 bg-black/20 overflow-hidden transition-transform duration-300 hover:scale-[1.035] hover:border-cyan-400/35 cursor-pointer text-left">
                           <div className="aspect-square bg-dark-900/50">
                             {inst?.image_url ? (
                               <img src={String(inst.image_url)} alt={String(inst?.metadata?.name || inst?.id || 'NFT')} className="w-full h-full object-cover" />
@@ -2374,7 +2493,7 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
                             <div className="text-[10px] font-mono text-cyan-300 truncate">{String(inst?.metadata?.name || `NFT #${inst?.id || '--'}`)}</div>
                             <div className="text-[10px] font-mono text-gold-500/45">#{String(inst?.id || '--')}</div>
                           </div>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -2636,6 +2755,7 @@ const TokenView = ({
   const [holdersPrevStack, setHoldersPrevStack] = useState<any[]>([]);
   const [instances, setInstances] = useState<any[] | null>(null);
   const [instancesLoading, setInstancesLoading] = useState<boolean>(false);
+  const [selectedInstance, setSelectedInstance] = useState<any | null>(null);
 
   const [loading, setLoading] = useState(false);
 
@@ -2778,6 +2898,12 @@ const TokenView = ({
         BACK TO TOKENS
       </button>
 
+      <NftInstanceModal
+        instance={selectedInstance}
+        onClose={() => setSelectedInstance(null)}
+        onViewAddress={(a: string) => onViewAddress(a)}
+      />
+
       <div className="mb-6 flex items-center gap-4">
         <div className="p-4 bg-gold-500/10 rounded-xl border border-gold-500/20 shadow-[0_0_20px_rgba(255,215,0,0.10)]">
           <Database className="w-8 h-8 text-gold-400" />
@@ -2903,25 +3029,20 @@ const TokenView = ({
           <div className="mt-2 text-xs font-mono text-gold-500/60">{instancesLoading ? 'Loading…' : `${(instances || []).length} NFT instance(s)`}</div>
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {(instances || []).map((inst: any) => (
-              <div key={String(inst?.id)} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 overflow-hidden">
-                <div className="aspect-square bg-dark-900/60">
+              <div key={String(inst?.id)} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 overflow-hidden transition-transform duration-300 hover:scale-[1.02] hover:border-cyan-400/40">
+                <button type="button" onClick={() => setSelectedInstance(inst)} className="aspect-square bg-dark-900/60 block w-full text-left cursor-pointer">
                   {inst?.image_url ? (
                     <img src={String(inst.image_url)} alt={String(inst?.metadata?.name || inst?.id || 'NFT')} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-xs font-mono text-gold-500/40">NO IMAGE</div>
                   )}
-                </div>
+                </button>
                 <div className="p-4">
                   <div className="text-sm font-mono text-cyan-300">{String(inst?.metadata?.name || `NFT #${inst?.id || '--'}`)}</div>
                   <div className="mt-1 text-[10px] font-mono text-gold-500/45">tokenId #{String(inst?.id || '--')}</div>
                   <div className="mt-2 text-[10px] font-mono text-gold-500/45 break-all">owner {String(inst?.owner?.hash || '--')}</div>
                   <div className="mt-3 flex items-center gap-2 flex-wrap">
-                    {inst?.external_app_url ? (
-                      <a href={String(inst.external_app_url)} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">OPEN NFT</a>
-                    ) : null}
-                    {inst?.metadata ? (
-                      <button onClick={() => alert(JSON.stringify(inst.metadata, null, 2))} className="px-3 py-2 rounded-lg border border-gold-500/20 text-gold-400 text-xs font-mono hover:border-cyan-500/40 hover:text-cyan-300">META</button>
-                    ) : null}
+                    <button onClick={() => setSelectedInstance(inst)} className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">VIEW NFT</button>
                   </div>
                 </div>
               </div>
