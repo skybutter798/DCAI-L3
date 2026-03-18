@@ -20,6 +20,7 @@ const el = {
   refreshBtn: document.getElementById('refreshBtn'),
   passes: document.getElementById('passes'),
   surveySection: document.getElementById('surveySection'),
+  questionCard: document.getElementById('questionCard'),
   surveyTitle: document.getElementById('surveyTitle'),
   surveyMeta: document.getElementById('surveyMeta'),
   progressBar: document.getElementById('progressBar'),
@@ -69,6 +70,26 @@ function updateFlowStage() {
   if (state.wallet) active = 'sign';
   if (state.surveys.length > 0) active = 'survey';
   steps.forEach((node) => node.classList.toggle('active', node.dataset.flowStep === active));
+  if (el.flowStage && !el.flowStage.dataset.mode) {
+    el.flowStage.dataset.mode = active;
+  }
+}
+
+function setFlowMode(mode, duration = 1400) {
+  if (!el.flowStage) return;
+  el.flowStage.dataset.mode = mode;
+  clearTimeout(setFlowMode._timer);
+  setFlowMode._timer = setTimeout(() => {
+    delete el.flowStage.dataset.mode;
+    updateFlowStage();
+  }, duration);
+}
+
+function pulseQuestionCard() {
+  if (!el.questionCard) return;
+  el.questionCard.classList.remove('question-reveal');
+  void el.questionCard.offsetWidth;
+  el.questionCard.classList.add('question-reveal');
 }
 
 async function loadConfig() {
@@ -85,6 +106,7 @@ async function loadConfig() {
 }
 
 async function connectWallet() {
+  setFlowMode('connect', 1800);
   if (!window.ethereum) {
     setStatus('No wallet detected. Please install MetaMask or another EVM wallet.');
     return;
@@ -211,6 +233,7 @@ function renderPasses(surveys) {
 function selectSurvey(tokenId) {
   const survey = state.surveys.find((item) => item.tokenId === tokenId);
   if (!survey) return;
+  setFlowMode('survey', 1200);
   state.activeSurvey = survey;
   renderPasses(state.surveys);
   renderSurvey();
@@ -224,6 +247,7 @@ function renderSurvey() {
   }
 
   el.surveySection.classList.remove('hidden');
+  setFlowMode('survey', 900);
   el.surveyTitle.textContent = `Survey Pass #${survey.tokenId}`;
   el.surveyMeta.textContent = `${survey.answeredCount}/${survey.totalQuestions} answered`;
   el.progressBar.style.width = `${survey.progressPercent}%`;
@@ -234,12 +258,14 @@ function renderSurvey() {
     el.questionLabel.textContent = 'Completed';
     el.questionTitle.textContent = 'Survey completed';
     el.questionText.textContent = 'You have answered all 100 questions.';
+    pulseQuestionCard();
     return;
   }
 
   el.questionLabel.textContent = `Question ${String(next.question_no).padStart(3, '0')}`;
   el.questionTitle.textContent = next.question_title || `Question ${String(next.question_no).padStart(3, '0')}`;
   el.questionText.textContent = next.question_content || 'Lorem ipsum dolor sit amet.';
+  pulseQuestionCard();
 }
 
 async function submitAnswer(answer) {
@@ -266,6 +292,7 @@ async function submitAnswer(answer) {
 
 async function mintSurvey() {
   if (!state.config.survey.contractAddress) return;
+  setFlowMode('sign', 2200);
   setStatus('Preparing mint transaction…');
   const provider = new ethers.BrowserProvider(window.ethereum);
   const signer = await provider.getSigner();
@@ -317,6 +344,8 @@ async function init() {
   await loadConfig();
   renderWallet();
 
+  el.connectBtn.addEventListener('mouseenter', () => setFlowMode('connect', 900));
+  el.mintBtn.addEventListener('mouseenter', () => setFlowMode('sign', 900));
   el.connectBtn.addEventListener('click', connectWallet);
   el.switchBtn.addEventListener('click', async () => {
     try { await switchNetwork(); } catch (err) { setStatus(err.message); }

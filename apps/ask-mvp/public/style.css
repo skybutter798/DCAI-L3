@@ -227,6 +227,30 @@ body::after {
   box-shadow: 0 24px 56px rgba(255, 191, 71, 0.14);
 }
 
+.flow-stage[data-mode="connect"] .flow-node[data-flow-step="connect"],
+.flow-stage[data-mode="sign"] .flow-node[data-flow-step="sign"],
+.flow-stage[data-mode="survey"] .flow-node[data-flow-step="survey"] {
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(247, 245, 255, .95));
+  border-color: rgba(134, 181, 255, 0.48);
+  box-shadow: 0 24px 56px rgba(134, 181, 255, 0.16);
+}
+
+.flow-stage[data-mode="connect"] .scribble-path-main,
+.flow-stage[data-mode="sign"] .scribble-path-main,
+.flow-stage[data-mode="survey"] .scribble-path-main {
+  stroke-width: 5;
+  filter: drop-shadow(0 0 10px rgba(134, 181, 255, 0.24));
+}
+
+.flow-stage[data-mode="connect"] .flow-dot:nth-of-type(1),
+.flow-stage[data-mode="sign"] .flow-dot:nth-of-type(2),
+.flow-stage[data-mode="survey"] .flow-dot:nth-of-type(3) {
+  fill: rgba(255, 255, 255, 1);
+  stroke: rgba(255, 191, 71, 0.95);
+  transform-origin: center;
+  animation: pulseDot 0.9s ease-in-out infinite;
+}
+
 .flow-number {
   display: inline-flex;
   align-items: center;
@@ -369,6 +393,10 @@ button:disabled {
   border-radius: 50%;
 }
 
+.question-card.question-reveal {
+  animation: questionReveal .48s cubic-bezier(.2,.8,.2,1);
+}
+
 .question-card h3 {
   font-size: 30px;
   line-height: 1.25;
@@ -471,6 +499,19 @@ textarea {
 @keyframes pulseDot {
   0%, 100% { transform: scale(1); opacity: .88; }
   50% { transform: scale(1.18); opacity: 1; }
+}
+
+@keyframes questionReveal {
+  0% {
+    opacity: .4;
+    transform: translateY(10px) scale(.988);
+    filter: blur(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
 }
 
 .hidden {
