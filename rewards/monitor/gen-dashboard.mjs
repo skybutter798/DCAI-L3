@@ -877,6 +877,8 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
 
 
       // ---------------- API KEY APPROVALS ----------------
+      function initAdminTokenInput() {}
+
       async function adminFetch(path, opts) {
         return await fetch(API_URL + path, (opts || {}));
       }
