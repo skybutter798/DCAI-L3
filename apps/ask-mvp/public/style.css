@@ -253,6 +253,17 @@ button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
   opacity: 0;
   pointer-events: none;
   transform: translateY(22px);
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 28px;
+}
+
+#experience[data-auth="connected"][data-view="dashboard"] .dashboard-deck,
+#experience[data-auth="connected"][data-view="hub"] .survey-hub,
+#experience[data-auth="connected"][data-view="survey"] .survey-view {
+  position: relative;
+  top: auto;
 }
 
 .dashboard-grid {
