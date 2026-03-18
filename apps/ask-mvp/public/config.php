@@ -31,4 +31,5 @@ return [
     'storage' => [
         'sqlite' => __DIR__ . '/storage/ask.sqlite',
     ],
+    'admin' => require __DIR__ . '/admin-auth.php',
 ];
