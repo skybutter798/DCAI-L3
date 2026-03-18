@@ -1885,6 +1885,8 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
   const [addrTxsLoading, setAddrTxsLoading] = useState<boolean>(false);
   const [heldTokens, setHeldTokens] = useState<any[] | null>(null);
   const [heldTokensLoading, setHeldTokensLoading] = useState<boolean>(false);
+  const [nftCollections, setNftCollections] = useState<any[] | null>(null);
+  const [nftCollectionsLoading, setNftCollectionsLoading] = useState<boolean>(false);
 
   const [contract, setContract] = useState<any>(null);
   const [contractLoading, setContractLoading] = useState<boolean>(false);
@@ -1906,6 +1908,7 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
     // reset per-address caches
     setAddrTxs(null);
     setHeldTokens(null);
+    setNftCollections(null);
     setContract(null);
     setTab('overview');
   }, [address]);
@@ -1983,6 +1986,25 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
       }
     };
     if (tab === 'tokens' && heldTokens == null && !heldTokensLoading) loadHeldTokens();
+    return () => { cancelled = true; };
+  }, [tab, address]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadNftCollections = async () => {
+      try {
+        setNftCollectionsLoading(true);
+        const res = await fetch(`/api/v2/addresses/${address}/nft/collections`, { cache: 'no-store' });
+        if (res.status === 429) return;
+        const j = await res.json();
+        if (!cancelled) setNftCollections(j?.items || []);
+      } catch {
+        if (!cancelled) setNftCollections([]);
+      } finally {
+        if (!cancelled) setNftCollectionsLoading(false);
+      }
+    };
+    if (tab === 'tokens' && nftCollections == null && !nftCollectionsLoading) loadNftCollections();
     return () => { cancelled = true; };
   }, [tab, address]);
 
@@ -2319,6 +2341,48 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
             {heldTokensLoading ? 'Loading held tokens…' : (heldTokens && heldTokens.length ? `${heldTokens.length} token(s) held by this address` : 'No tokens held by this address.')}
           </div>
 
+          {nftCollectionsLoading ? (
+            <div className="mt-4 text-xs font-mono text-gold-500/50">Loading NFT previews…</div>
+          ) : nftCollections && nftCollections.length ? (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {nftCollections.map((col: any, i: number) => {
+                const token = col?.token || {};
+                const tokenAddr = String(token?.address || '').trim();
+                const instances = Array.isArray(col?.token_instances) ? col.token_instances : [];
+                return (
+                  <div key={tokenAddr || i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-mono text-cyan-300">{String(token?.symbol || 'NFT')} · {String(token?.name || 'Collection')}</div>
+                        <div className="mt-1 text-[10px] font-mono text-gold-500/45">{String(token?.type || '--')} · {String(col?.amount || '--')} item(s)</div>
+                      </div>
+                      {tokenAddr ? (
+                        <button onClick={() => onViewToken(tokenAddr)} className="shrink-0 px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">OPEN</button>
+                      ) : null}
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      {instances.slice(0, 4).map((inst: any) => (
+                        <div key={String(inst?.id)} className="rounded-lg border border-gold-500/10 bg-black/20 overflow-hidden">
+                          <div className="aspect-square bg-dark-900/50">
+                            {inst?.image_url ? (
+                              <img src={String(inst.image_url)} alt={String(inst?.metadata?.name || inst?.id || 'NFT')} className="w-full h-full object-cover" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-[10px] font-mono text-gold-500/40">NO IMAGE</div>
+                            )}
+                          </div>
+                          <div className="p-2">
+                            <div className="text-[10px] font-mono text-cyan-300 truncate">{String(inst?.metadata?.name || `NFT #${inst?.id || '--'}`)}</div>
+                            <div className="text-[10px] font-mono text-gold-500/45">#{String(inst?.id || '--')}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
           <div className="mt-4 space-y-3">
             {(heldTokens || []).map((item: any, i: number) => {
               const token = item?.token || item;
@@ -2559,7 +2623,7 @@ const TokenView = ({
   onViewAddress: (a: string) => void,
 }) => {
   const [info, setInfo] = useState<any>(null);
-  const [tab, setTab] = useState<'overview' | 'transfers' | 'holders'>('transfers');
+  const [tab, setTab] = useState<'overview' | 'transfers' | 'holders' | 'instances'>('transfers');
 
   const [transfers, setTransfers] = useState<any[] | null>(null);
   const [transfersPageParams, setTransfersPageParams] = useState<any | null>(null);
@@ -2570,6 +2634,8 @@ const TokenView = ({
   const [holdersPageParams, setHoldersPageParams] = useState<any | null>(null);
   const [holdersNextParams, setHoldersNextParams] = useState<any | null>(null);
   const [holdersPrevStack, setHoldersPrevStack] = useState<any[]>([]);
+  const [instances, setInstances] = useState<any[] | null>(null);
+  const [instancesLoading, setInstancesLoading] = useState<boolean>(false);
 
   const [loading, setLoading] = useState(false);
 
@@ -2620,6 +2686,7 @@ const TokenView = ({
     setHoldersPageParams(null);
     setHoldersNextParams(null);
     setHoldersPrevStack([]);
+    setInstances(null);
   }, [address]);
 
   useEffect(() => {
@@ -2669,15 +2736,30 @@ const TokenView = ({
       }
     };
 
+    const loadInstances = async () => {
+      try {
+        setInstancesLoading(true);
+        const res = await fetch(`/api/v2/tokens/${address}/instances`, { cache: 'no-store' });
+        if (res.status === 429) return;
+        const j = await res.json();
+        if (!cancelled) setInstances(j?.items || []);
+      } catch {
+        if (!cancelled) setInstances([]);
+      } finally {
+        if (!cancelled) setInstancesLoading(false);
+      }
+    };
+
     if (!address) return () => { cancelled = true; };
 
     if (tab === 'transfers') loadTransfers();
     if (tab === 'holders') loadHolders();
+    if (tab === 'instances' && /721|1155/i.test(String(info?.type || '')) && instances == null && !instancesLoading) loadInstances();
 
     return () => {
       cancelled = true;
     };
-  }, [address, tab, transfersPageParams, holdersPageParams]);
+  }, [address, tab, transfersPageParams, holdersPageParams, info?.type]);
 
   const isNft = /721|1155/i.test(String(info?.type || ''));
   const decimals = isNft ? null : (info?.decimals ?? '18');
@@ -2718,6 +2800,7 @@ const TokenView = ({
         {[
           { k: 'transfers', label: 'TOKEN TRANSFERS' },
           { k: 'holders', label: 'HOLDERS' },
+          ...(isNft ? [{ k: 'instances', label: 'NFTS' }] : []),
           { k: 'overview', label: 'OVERVIEW' },
         ].map((t) => (
           <button
@@ -2810,6 +2893,39 @@ const TokenView = ({
             {holders && holders.length === 0 ? (
               <div className="text-xs font-mono text-gold-500/60">No holders.</div>
             ) : null}
+          </div>
+        </div>
+      ) : tab === 'instances' ? (
+        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
+          <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
+            <Database className="w-5 h-5" /> NFT INSTANCES
+          </h2>
+          <div className="mt-2 text-xs font-mono text-gold-500/60">{instancesLoading ? 'Loading…' : `${(instances || []).length} NFT instance(s)`}</div>
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {(instances || []).map((inst: any) => (
+              <div key={String(inst?.id)} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 overflow-hidden">
+                <div className="aspect-square bg-dark-900/60">
+                  {inst?.image_url ? (
+                    <img src={String(inst.image_url)} alt={String(inst?.metadata?.name || inst?.id || 'NFT')} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-xs font-mono text-gold-500/40">NO IMAGE</div>
+                  )}
+                </div>
+                <div className="p-4">
+                  <div className="text-sm font-mono text-cyan-300">{String(inst?.metadata?.name || `NFT #${inst?.id || '--'}`)}</div>
+                  <div className="mt-1 text-[10px] font-mono text-gold-500/45">tokenId #{String(inst?.id || '--')}</div>
+                  <div className="mt-2 text-[10px] font-mono text-gold-500/45 break-all">owner {String(inst?.owner?.hash || '--')}</div>
+                  <div className="mt-3 flex items-center gap-2 flex-wrap">
+                    {inst?.external_app_url ? (
+                      <a href={String(inst.external_app_url)} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">OPEN NFT</a>
+                    ) : null}
+                    {inst?.metadata ? (
+                      <button onClick={() => alert(JSON.stringify(inst.metadata, null, 2))} className="px-3 py-2 rounded-lg border border-gold-500/20 text-gold-400 text-xs font-mono hover:border-cyan-500/40 hover:text-cyan-300">META</button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       ) : (
