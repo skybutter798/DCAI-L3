@@ -1883,6 +1883,8 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [addrTxs, setAddrTxs] = useState<any[] | null>(null);
   const [addrTxsLoading, setAddrTxsLoading] = useState<boolean>(false);
+  const [heldTokens, setHeldTokens] = useState<any[] | null>(null);
+  const [heldTokensLoading, setHeldTokensLoading] = useState<boolean>(false);
 
   const [contract, setContract] = useState<any>(null);
   const [contractLoading, setContractLoading] = useState<boolean>(false);
@@ -1903,6 +1905,7 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
   useEffect(() => {
     // reset per-address caches
     setAddrTxs(null);
+    setHeldTokens(null);
     setContract(null);
     setTab('overview');
   }, [address]);
@@ -1961,6 +1964,25 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
       finally { if (!cancelled) setAddrTxsLoading(false); }
     };
     if (tab === 'txs' && addrTxs == null && !addrTxsLoading) loadAddrTxs();
+    return () => { cancelled = true; };
+  }, [tab, address]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadHeldTokens = async () => {
+      try {
+        setHeldTokensLoading(true);
+        const res = await fetch(`/api/v2/addresses/${address}/tokens`, { cache: 'no-store' });
+        if (res.status === 429) return;
+        const j = await res.json();
+        if (!cancelled) setHeldTokens(j?.items || []);
+      } catch {
+        if (!cancelled) setHeldTokens([]);
+      } finally {
+        if (!cancelled) setHeldTokensLoading(false);
+      }
+    };
+    if (tab === 'tokens' && heldTokens == null && !heldTokensLoading) loadHeldTokens();
     return () => { cancelled = true; };
   }, [tab, address]);
 
@@ -2040,11 +2062,15 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
         <div className="mb-6 glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-4 border-t-2 border-t-cyan-500/30">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="text-xs font-mono text-gold-500/60">This address is a token contract</div>
+              <div className="text-xs font-mono text-gold-500/60">
+                {String(tokenMeta.type || '').includes('721') || String(tokenMeta.type || '').includes('1155') ? 'This address is an NFT contract' : 'This address is a token contract'}
+              </div>
               <div className="mt-1 text-sm font-mono text-cyan-300">
                 {String(tokenMeta.symbol || 'TOKEN')} · {String(tokenMeta.name || 'Token')}
               </div>
-              <div className="mt-1 text-[10px] font-mono text-gold-500/45">decimals {String(tokenMeta.decimals ?? '--')} · holders {String(tokenMeta.holders ?? '--')}</div>
+              <div className="mt-1 text-[10px] font-mono text-gold-500/45">
+                type {String(tokenMeta.type || '--')} · holders {String(tokenMeta.holders ?? '--')} · {String(tokenMeta.type || '').includes('721') || String(tokenMeta.type || '').includes('1155') ? 'supply' : 'decimals'} {String(String(tokenMeta.type || '').includes('721') || String(tokenMeta.type || '').includes('1155') ? (tokenMeta.total_supply ?? '--') : (tokenMeta.decimals ?? '--'))}
+              </div>
             </div>
             <button
               onClick={() => onViewToken(String(tokenMeta.address || address))}
@@ -2268,7 +2294,65 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
           <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
             <Database className="w-5 h-5 text-cyan-400" /> TOKENS
           </h2>
-          <div className="text-xs font-mono text-gold-500/60">Skeleton ready. Next: fetch /api/v2/addresses/:hash/tokens</div>
+
+          {tokenMeta ? (
+            <div className="mb-4 rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
+              <div className="text-[10px] font-mono text-gold-500/40">
+                {String(tokenMeta.type || '').includes('721') || String(tokenMeta.type || '').includes('1155') ? 'This address is the NFT contract itself' : 'This address is the token contract itself'}
+              </div>
+              <div className="mt-1 text-sm font-mono text-cyan-300">
+                {String(tokenMeta.symbol || 'TOKEN')} · {String(tokenMeta.name || 'Token')}
+              </div>
+              <div className="mt-1 text-[10px] font-mono text-gold-500/50">
+                type {String(tokenMeta.type || '--')} · holders {String(tokenMeta.holders ?? '--')} · total supply {String(tokenMeta.total_supply ?? '--')}
+              </div>
+              <button
+                onClick={() => onViewToken(String(tokenMeta.address || address))}
+                className="mt-3 px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60"
+              >
+                OPEN TOKEN PAGE
+              </button>
+            </div>
+          ) : null}
+
+          <div className="text-xs font-mono text-gold-500/60">
+            {heldTokensLoading ? 'Loading held tokens…' : (heldTokens && heldTokens.length ? `${heldTokens.length} token(s) held by this address` : 'No tokens held by this address.')}
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {(heldTokens || []).map((item: any, i: number) => {
+              const token = item?.token || item;
+              const tokenAddr = String(token?.address || token?.hash || '').trim();
+              const symbol = String(token?.symbol || 'TOKEN');
+              const name = String(token?.name || 'Token');
+              const type = String(token?.type || '--');
+              const value = item?.value ?? token?.value ?? '--';
+              return (
+                <div key={tokenAddr || i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-sm font-mono text-cyan-300">{symbol} · {name}</div>
+                      <div className="mt-1 text-[10px] font-mono text-gold-500/45">{type} · value {String(value)}</div>
+                      <button
+                        onClick={() => tokenAddr && onViewToken(tokenAddr)}
+                        className="mt-2 text-left text-[11px] font-mono text-gold-500/60 hover:text-cyan-300 underline decoration-gold-500/10 hover:decoration-cyan-400/60 break-all"
+                      >
+                        {tokenAddr || '--'}
+                      </button>
+                    </div>
+                    {tokenAddr ? (
+                      <button
+                        onClick={() => onViewToken(tokenAddr)}
+                        className="shrink-0 px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60"
+                      >
+                        OPEN
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </motion.div>
