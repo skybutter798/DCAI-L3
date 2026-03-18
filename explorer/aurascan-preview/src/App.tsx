@@ -2679,7 +2679,8 @@ const TokenView = ({
     };
   }, [address, tab, transfersPageParams, holdersPageParams]);
 
-  const decimals = info?.decimals ?? '18';
+  const isNft = /721|1155/i.test(String(info?.type || ''));
+  const decimals = isNft ? null : (info?.decimals ?? '18');
   const symbol = info?.symbol || 'TOKEN';
   const name = info?.name || '';
 
@@ -2709,7 +2710,7 @@ const TokenView = ({
           >
             {address}
           </button>
-          <div className="mt-1 text-[10px] font-mono text-gold-500/40">decimals {decimals} · holders {info?.holders ?? '--'} · type {info?.type ?? '--'}</div>
+          <div className="mt-1 text-[10px] font-mono text-gold-500/40">type {info?.type ?? '--'} · holders {info?.holders ?? '--'} · {isNft ? `supply ${info?.total_supply ?? '--'}` : `decimals ${decimals ?? '--'}`}</div>
         </div>
       </div>
 
@@ -2745,8 +2746,8 @@ const TokenView = ({
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
             <DetailRow label="SYMBOL" value={symbol} isCyan />
             <DetailRow label="NAME" value={name || '--'} />
-            <DetailRow label="DECIMALS" value={String(decimals)} />
-            <DetailRow label="TOTAL SUPPLY" value={`${fmtUnits(info?.total_supply, decimals, 6)} ${symbol}`} />
+            <DetailRow label="DECIMALS" value={isNft ? 'not applicable (NFT)' : String(decimals)} />
+            <DetailRow label="TOTAL SUPPLY" value={isNft ? `${String(info?.total_supply ?? '--')} NFT` : `${fmtUnits(info?.total_supply, decimals, 6)} ${symbol}`} />
           </div>
           <div className="mt-4 text-[11px] font-mono text-gold-500/50">{loading ? 'Loading…' : ''}</div>
         </div>
@@ -2798,7 +2799,7 @@ const TokenView = ({
                       {a ? short(a, 14, 10) : '--'}
                     </button>
                     <div className="text-right">
-                      <div className="text-sm font-mono text-gold-500/90">{fmtUnits(v, decimals, 6)} {symbol}</div>
+                      <div className="text-sm font-mono text-gold-500/90">{isNft ? `${String(v ?? '--')} NFT` : `${fmtUnits(v, decimals, 6)} ${symbol}`}</div>
                       <div className="text-[10px] font-mono text-gold-500/35">{String(v ?? '--')} raw</div>
                     </div>
                   </div>
@@ -2853,7 +2854,7 @@ const TokenView = ({
               const to = String(tr?.to?.hash || tr?.to || '').trim();
               const method = String(tr?.method || '').trim();
               const amt = tr?.total?.value ?? tr?.value ?? tr?.amount ?? '0';
-              const tokenId = tr?.token_id;
+              const tokenId = tr?.total?.token_id ?? tr?.token_id ?? tr?.token_id;
 
               const methodLabel = () => {
                 const z = '0x0000000000000000000000000000000000000000';
@@ -2901,7 +2902,9 @@ const TokenView = ({
                     </div>
 
                     <div className="shrink-0 text-right">
-                      <div className="text-sm font-mono text-gold-500/90">{fmtUnits(amt, decimals, 6)} <span className="text-gold-500/60">{symbol}</span></div>
+                      <div className="text-sm font-mono text-gold-500/90">
+                        {isNft ? (tokenId != null ? `NFT #${String(tokenId)}` : 'NFT') : <>{fmtUnits(amt, decimals, 6)} <span className="text-gold-500/60">{symbol}</span></>}
+                      </div>
                       <div className="text-[10px] font-mono text-gold-500/35">tokenId {tokenId == null ? '-' : String(tokenId)}</div>
                     </div>
                   </div>
