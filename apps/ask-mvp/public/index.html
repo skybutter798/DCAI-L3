@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ASK — DCAI Survey Pass</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="hero card">
+      <div>
+        <p class="eyebrow">DCAI L3 • ASK MVP</p>
+        <h1>Survey NFT + Wallet + Progress</h1>
+        <p class="muted">Connect wallet, mint a survey pass, answer YES / NO questions, and resume later from the same NFT.</p>
+      </div>
+      <div class="hero-actions">
+        <button id="connectBtn">Connect Wallet</button>
+        <button id="switchBtn" class="ghost">Switch to DCAI L3</button>
+      </div>
+    </header>
+
+    <section class="grid top-grid">
+      <div class="card">
+        <h2>Wallet</h2>
+        <p><strong>Address:</strong> <span id="walletAddress">Not connected</span></p>
+        <p><strong>Network:</strong> <span id="networkName">Unknown</span></p>
+        <p><strong>Status:</strong> <span id="statusText">Loading config…</span></p>
+      </div>
+
+      <div class="card">
+        <h2>Mint Survey Pass</h2>
+        <p class="muted">Price: <span id="mintPriceDisplay">1</span> tDCAI</p>
+        <button id="mintBtn" disabled>Mint Survey NFT</button>
+        <button id="demoMintBtn" class="ghost" hidden>Create Demo Survey Pass</button>
+        <p id="mintHint" class="note"></p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-title-row">
+        <h2>My Survey Passes</h2>
+        <button id="refreshBtn" class="ghost">Refresh</button>
+      </div>
+      <div id="passes" class="passes empty">Connect wallet to load your survey NFTs.</div>
+    </section>
+
+    <section id="surveySection" class="card hidden">
+      <div class="section-title-row">
+        <h2 id="surveyTitle">Survey</h2>
+        <span id="surveyMeta" class="chip"></span>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-bar"><div id="progressBar"></div></div>
+        <p id="progressText" class="note"></p>
+      </div>
+      <div id="questionCard" class="question-card">
+        <p id="questionLabel" class="eyebrow">Question</p>
+        <h3 id="questionText">Select a survey pass to continue.</h3>
+        <div class="answer-actions">
+          <button data-answer="yes" class="answer yes">YES</button>
+          <button data-answer="no" class="answer no">NO</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.5/dist/ethers.umd.min.js"></script>
+  <script src="./app.js" type="module"></script>
+</body>
+</html>
