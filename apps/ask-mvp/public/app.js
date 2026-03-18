@@ -4,25 +4,28 @@ const state = {
   chainId: null,
   surveys: [],
   activeSurvey: null,
+  view: 'home',
 };
 
 const el = {
-  walletAddress: document.getElementById('walletAddress'),
-  networkName: document.getElementById('networkName'),
-  statusText: document.getElementById('statusText'),
-  mintPriceDisplay: document.getElementById('mintPriceDisplay'),
-  mintHint: document.getElementById('mintHint'),
-  flowStage: document.getElementById('flowStage'),
+  experience: document.getElementById('experience'),
   connectBtn: document.getElementById('connectBtn'),
   switchBtn: document.getElementById('switchBtn'),
+  statusText: document.getElementById('statusText'),
+  walletAddress: document.getElementById('walletAddress'),
+  walletStatus: document.getElementById('walletStatus'),
+  mintPriceDisplay: document.getElementById('mintPriceDisplay'),
+  mintHint: document.getElementById('mintHint'),
   mintBtn: document.getElementById('mintBtn'),
-  demoMintBtn: document.getElementById('demoMintBtn'),
-  refreshBtn: document.getElementById('refreshBtn'),
+  startSurveyCard: document.getElementById('startSurveyCard'),
+  startSurveyBtn: document.getElementById('startSurveyBtn'),
+  backToDashboardBtn: document.getElementById('backToDashboardBtn'),
+  backToHubBtn: document.getElementById('backToHubBtn'),
   passes: document.getElementById('passes'),
   surveySection: document.getElementById('surveySection'),
-  questionCard: document.getElementById('questionCard'),
   surveyTitle: document.getElementById('surveyTitle'),
   surveyMeta: document.getElementById('surveyMeta'),
+  questionCard: document.getElementById('questionCard'),
   progressBar: document.getElementById('progressBar'),
   progressText: document.getElementById('progressText'),
   questionLabel: document.getElementById('questionLabel'),
@@ -64,27 +67,6 @@ function setStatus(text) {
   el.statusText.textContent = text;
 }
 
-function updateFlowStage() {
-  const steps = document.querySelectorAll('[data-flow-step]');
-  let active = 'connect';
-  if (state.wallet) active = 'sign';
-  if (state.surveys.length > 0) active = 'survey';
-  steps.forEach((node) => node.classList.toggle('active', node.dataset.flowStep === active));
-  if (el.flowStage && !el.flowStage.dataset.mode) {
-    el.flowStage.dataset.mode = active;
-  }
-}
-
-function setFlowMode(mode, duration = 1400) {
-  if (!el.flowStage) return;
-  el.flowStage.dataset.mode = mode;
-  clearTimeout(setFlowMode._timer);
-  setFlowMode._timer = setTimeout(() => {
-    delete el.flowStage.dataset.mode;
-    updateFlowStage();
-  }, duration);
-}
-
 function pulseQuestionCard() {
   if (!el.questionCard) return;
   el.questionCard.classList.remove('question-reveal');
@@ -92,29 +74,49 @@ function pulseQuestionCard() {
   el.questionCard.classList.add('question-reveal');
 }
 
+function setView(view) {
+  state.view = view;
+  renderScene();
+}
+
+function renderScene() {
+  el.experience.dataset.auth = state.wallet ? 'connected' : 'guest';
+  el.experience.dataset.view = state.wallet ? state.view : 'home';
+
+  const onRightChain = state.config && state.chainId === state.config.chain.chainIdHex;
+  el.walletAddress.textContent = state.wallet || 'Not connected';
+  el.walletStatus.textContent = !state.wallet
+    ? 'Disconnected'
+    : onRightChain
+      ? 'Connected on DCAI L3'
+      : 'Connected, wrong network';
+
+  el.mintBtn.disabled = !state.wallet || !onRightChain || !state.config?.survey?.contractAddress;
+  el.startSurveyCard.hidden = state.surveys.length === 0;
+}
+
 async function loadConfig() {
   const json = await api('config');
   state.config = json;
   el.mintPriceDisplay.textContent = json.survey.mintPriceDisplay;
   el.mintHint.textContent = json.survey.contractAddress
-    ? `Contract ready: ${json.survey.contractAddress}`
+    ? `Live contract: ${json.survey.contractAddress}`
     : json.survey.demoModeLabel;
-  if (!json.survey.contractAddress && json.survey.allowDemoMint) {
-    el.demoMintBtn.hidden = false;
-  }
-  setStatus('Config loaded');
+  renderScene();
+  setStatus('Waiting for wallet.');
 }
 
 async function connectWallet() {
-  setFlowMode('connect', 1800);
   if (!window.ethereum) {
     setStatus('No wallet detected. Please install MetaMask or another EVM wallet.');
     return;
   }
   const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-  state.wallet = accounts[0];
+  state.wallet = accounts[0] || null;
   state.chainId = await window.ethereum.request({ method: 'eth_chainId' });
-  renderWallet();
+  setStatus('Wallet connected. Loading passes…');
+  setView('dashboard');
+  renderScene();
   await refreshPasses();
 }
 
@@ -143,23 +145,7 @@ async function switchNetwork() {
     }
   }
   state.chainId = await window.ethereum.request({ method: 'eth_chainId' });
-  renderWallet();
-}
-
-function renderWallet() {
-  el.walletAddress.textContent = short(state.wallet);
-  el.networkName.textContent = state.chainId || 'Unknown';
-  const rightChain = state.chainId === state.config.chain.chainIdHex;
-  el.mintBtn.disabled = !state.wallet || !rightChain || !state.config.survey.contractAddress;
-  el.switchBtn.disabled = !window.ethereum;
-  if (!state.wallet) {
-    setStatus('Wallet not connected');
-  } else if (!rightChain) {
-    setStatus('Connected, but not on DCAI L3 yet');
-  } else {
-    setStatus('Wallet connected on DCAI L3');
-  }
-  updateFlowStage();
+  renderScene();
 }
 
 async function fetchOnchainTokenIds() {
@@ -178,7 +164,7 @@ async function refreshPasses() {
   if (!state.wallet || !state.config) {
     state.surveys = [];
     renderPasses([]);
-    updateFlowStage();
+    renderScene();
     return;
   }
 
@@ -186,42 +172,27 @@ async function refreshPasses() {
   if (state.config.survey.contractAddress) {
     const tokenIds = await fetchOnchainTokenIds();
     surveys = await Promise.all(tokenIds.map(async (tokenId) => (await api('survey', { params: { tokenId } })).survey));
-  } else {
-    surveys = (await api('my-surveys', { params: { wallet: state.wallet } })).surveys;
   }
 
   state.surveys = surveys.sort((a, b) => b.tokenId - a.tokenId);
-  updateFlowStage();
   renderPasses(state.surveys);
-
-  const tokenParam = new URLSearchParams(window.location.search).get('tokenId');
-  if (tokenParam) {
-    const found = state.surveys.find((item) => item.tokenId === Number(tokenParam));
-    if (found) selectSurvey(found.tokenId);
-  }
+  renderScene();
+  setStatus(state.surveys.length ? 'Wallet ready. Survey passes detected.' : 'Wallet ready. No survey pass yet.');
 }
 
 function renderPasses(surveys) {
   if (!surveys.length) {
-    el.passes.className = 'passes empty';
-    el.passes.textContent = state.wallet
-      ? 'No survey passes found yet.'
-      : 'Connect wallet to load your survey NFTs.';
+    el.passes.innerHTML = '<div class="empty-state card">No survey passes yet. Mint one first.</div>';
     return;
   }
 
-  el.passes.className = 'passes';
   el.passes.innerHTML = surveys.map((survey) => `
-    <article class="pass-card ${state.activeSurvey?.tokenId === survey.tokenId ? 'active' : ''}">
+    <article class="pass-tile card ${state.activeSurvey?.tokenId === survey.tokenId ? 'active' : ''}">
+      <span class="card-kicker">NFT Pass</span>
       <h3>Survey Pass #${survey.tokenId}</h3>
-      <div class="pass-meta">
-        <div>Mode: ${survey.mode}</div>
-        <div>Answered: ${survey.answeredCount} / ${survey.totalQuestions}</div>
-        <div>Score: ${survey.score}</div>
-        <div>Status: ${survey.completedAt ? 'Completed' : 'In Progress'}</div>
-      </div>
-      <p class="note">Mint tx: ${survey.mintTxHash || 'Pending'}</p>
-      <button data-open="${survey.tokenId}" class="ghost">Open Survey</button>
+      <p class="feature-copy">Answered ${survey.answeredCount}/${survey.totalQuestions} · ${survey.completedAt ? 'Completed' : 'In progress'}</p>
+      <div class="tile-meta mono">${survey.payerAddress}</div>
+      <button data-open="${survey.tokenId}" class="primary-cta alt">Open Survey</button>
     </article>
   `).join('');
 
@@ -233,31 +204,26 @@ function renderPasses(surveys) {
 function selectSurvey(tokenId) {
   const survey = state.surveys.find((item) => item.tokenId === tokenId);
   if (!survey) return;
-  setFlowMode('survey', 1200);
   state.activeSurvey = survey;
+  setView('survey');
   renderPasses(state.surveys);
   renderSurvey();
 }
 
 function renderSurvey() {
   const survey = state.activeSurvey;
-  if (!survey) {
-    el.surveySection.classList.add('hidden');
-    return;
-  }
+  if (!survey) return;
 
-  el.surveySection.classList.remove('hidden');
-  setFlowMode('survey', 900);
   el.surveyTitle.textContent = `Survey Pass #${survey.tokenId}`;
-  el.surveyMeta.textContent = `${survey.answeredCount}/${survey.totalQuestions} answered`;
+  el.surveyMeta.textContent = `${survey.answeredCount}/${survey.totalQuestions}`;
   el.progressBar.style.width = `${survey.progressPercent}%`;
-  el.progressText.textContent = `Score ${survey.score} • Progress ${survey.progressPercent}% • ${survey.completedAt ? 'Completed' : 'Continue anytime as long as this NFT is held.'}`;
+  el.progressText.textContent = `Progress ${survey.progressPercent}% · ${survey.completedAt ? 'Completed' : 'Resume anytime while this NFT stays in your wallet.'}`;
 
   const next = survey.questions.find((q) => q.question_no === survey.nextQuestionNo);
   if (!next) {
     el.questionLabel.textContent = 'Completed';
     el.questionTitle.textContent = 'Survey completed';
-    el.questionText.textContent = 'You have answered all 100 questions.';
+    el.questionText.textContent = 'You have answered all available questions.';
     pulseQuestionCard();
     return;
   }
@@ -271,7 +237,7 @@ function renderSurvey() {
 async function submitAnswer(answer) {
   const survey = state.activeSurvey;
   if (!survey || !survey.nextQuestionNo || !state.wallet) return;
-  setStatus(`Saving answer ${answer.toUpperCase()} for question ${survey.nextQuestionNo}…`);
+  setStatus(`Saving ${answer.toUpperCase()}…`);
   await api('answer', {
     method: 'POST',
     body: {
@@ -287,18 +253,17 @@ async function submitAnswer(answer) {
   state.activeSurvey = fresh.survey;
   renderPasses(state.surveys);
   renderSurvey();
-  setStatus('Answer saved');
+  setStatus('Answer saved.');
 }
 
 async function mintSurvey() {
-  if (!state.config.survey.contractAddress) return;
-  setFlowMode('sign', 2200);
+  if (!state.config?.survey?.contractAddress) return;
   setStatus('Preparing mint transaction…');
   const provider = new ethers.BrowserProvider(window.ethereum);
   const signer = await provider.getSigner();
   const contract = new ethers.Contract(state.config.survey.contractAddress, NFT_ABI, signer);
   const tx = await contract.mintSurveyPass(1, { value: state.config.survey.mintPriceWei });
-  setStatus('Waiting for transaction confirmation…');
+  setStatus('Waiting for confirmation…');
   const receipt = await tx.wait();
   const iface = new ethers.Interface(NFT_ABI);
   let tokenId = null;
@@ -312,6 +277,7 @@ async function mintSurvey() {
     } catch (_) {}
   }
   if (!tokenId) throw new Error('Mint succeeded but tokenId was not found in logs');
+
   await api('register-mint', {
     method: 'POST',
     body: {
@@ -321,69 +287,49 @@ async function mintSurvey() {
       surveyId: 1,
     },
   });
-  setStatus(`Minted Survey Pass #${tokenId}`);
-  await refreshPasses();
-}
 
-async function demoMint() {
-  if (!state.wallet) {
-    setStatus('Connect wallet first');
-    return;
-  }
-  setStatus('Creating demo survey pass…');
-  const json = await api('demo-mint', {
-    method: 'POST',
-    body: { walletAddress: state.wallet },
-  });
   await refreshPasses();
-  selectSurvey(json.tokenId);
-  setStatus(`Demo Survey Pass #${json.tokenId} created`);
+  setView('dashboard');
+  setStatus(`Minted Survey Pass #${tokenId}`);
 }
 
 async function init() {
   await loadConfig();
-  renderWallet();
 
-  el.connectBtn.addEventListener('mouseenter', () => setFlowMode('connect', 900));
-  el.mintBtn.addEventListener('mouseenter', () => setFlowMode('sign', 900));
-  el.connectBtn.addEventListener('click', connectWallet);
-  el.switchBtn.addEventListener('click', async () => {
-    try { await switchNetwork(); } catch (err) { setStatus(err.message); }
-  });
-  el.refreshBtn.addEventListener('click', () => refreshPasses().catch((err) => setStatus(err.message)));
+  el.connectBtn.addEventListener('click', () => connectWallet().catch((err) => setStatus(err.message)));
+  el.switchBtn.addEventListener('click', () => switchNetwork().catch((err) => setStatus(err.message)));
   el.mintBtn.addEventListener('click', () => mintSurvey().catch((err) => setStatus(err.message)));
-  el.demoMintBtn.addEventListener('click', () => demoMint().catch((err) => setStatus(err.message)));
+  el.startSurveyBtn.addEventListener('click', () => setView('hub'));
+  el.backToDashboardBtn.addEventListener('click', () => setView('dashboard'));
+  el.backToHubBtn.addEventListener('click', () => setView('hub'));
+
   document.querySelectorAll('.answer').forEach((btn) => {
     btn.addEventListener('click', () => submitAnswer(btn.dataset.answer).catch((err) => setStatus(err.message)));
   });
 
-  if (el.flowStage) {
-    el.flowStage.addEventListener('mousemove', (event) => {
-      const rect = el.flowStage.getBoundingClientRect();
-      const px = ((event.clientX - rect.left) / rect.width - 0.5) * 24;
-      const py = ((event.clientY - rect.top) / rect.height - 0.5) * 24;
-      el.flowStage.style.setProperty('--px', `${px.toFixed(2)}px`);
-      el.flowStage.style.setProperty('--py', `${py.toFixed(2)}px`);
-    });
-    el.flowStage.addEventListener('mouseleave', () => {
-      el.flowStage.style.setProperty('--px', '0px');
-      el.flowStage.style.setProperty('--py', '0px');
-    });
-  }
-
-  updateFlowStage();
-
   if (window.ethereum) {
     window.ethereum.on('accountsChanged', (accounts) => {
       state.wallet = accounts[0] || null;
-      renderWallet();
-      refreshPasses().catch((err) => setStatus(err.message));
+      state.activeSurvey = null;
+      if (!state.wallet) {
+        state.surveys = [];
+        setView('home');
+        renderPasses([]);
+        renderScene();
+        setStatus('Wallet disconnected.');
+        return;
+      }
+      connectWallet().catch((err) => setStatus(err.message));
     });
+
     window.ethereum.on('chainChanged', (chainId) => {
       state.chainId = chainId;
-      renderWallet();
+      renderScene();
     });
   }
+
+  renderPasses([]);
+  renderScene();
 }
 
 init().catch((err) => setStatus(err.message));

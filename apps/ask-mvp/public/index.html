@@ -7,85 +7,94 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <div class="shell">
-    <header class="hero card">
-      <div>
-        <p class="eyebrow">DCAI L3 • ASK MVP</p>
-        <h1>Survey NFT + Wallet + Progress</h1>
-        <p class="muted">Connect wallet, mint a survey pass, answer YES / NO questions, and resume later from the same NFT.</p>
-      </div>
-      <div class="hero-actions">
-        <button id="connectBtn">Connect Wallet</button>
-        <button id="switchBtn" class="ghost">Switch to DCAI L3</button>
-      </div>
-    </header>
-
-    <section class="flow-stage card" id="flowStage">
-      <svg class="flow-lines" viewBox="0 0 1200 340" fill="none" aria-hidden="true">
-        <path class="scribble-path scribble-path-main" d="M110 208C160 120 255 98 334 146C381 174 416 208 470 208C540 208 575 112 657 112C724 112 749 201 820 220C894 239 979 174 1036 126" />
-        <path class="scribble-path scribble-path-accent" d="M100 228C170 236 260 258 343 246C426 234 506 181 583 173C648 166 714 188 772 216C840 249 919 263 1094 214" />
-        <circle class="flow-dot" cx="150" cy="184" r="9" />
-        <circle class="flow-dot" cx="602" cy="151" r="9" />
-        <circle class="flow-dot" cx="1046" cy="126" r="9" />
+  <div class="shell app-shell" id="experience" data-auth="guest" data-view="home">
+    <div class="ambient-canvas" aria-hidden="true">
+      <svg class="ambient-svg" viewBox="0 0 1600 980" fill="none">
+        <path d="M-80 230C134 52 295 92 447 202C572 293 685 351 876 287C1010 242 1142 90 1356 135C1457 156 1539 209 1685 335" />
+        <path d="M-60 650C141 565 302 510 461 584C626 662 730 831 948 819C1119 811 1221 640 1370 609C1515 578 1608 625 1716 745" />
+        <path d="M245 990C335 836 467 733 626 720C756 709 886 767 1034 726C1188 683 1332 524 1561 569" />
+        <path class="accent" d="M174 352C295 285 410 311 531 418C635 510 752 551 888 517C1046 477 1146 342 1325 360" />
       </svg>
+    </div>
 
-      <div class="flow-grid">
-        <article class="flow-node" data-flow-step="connect">
-          <span class="flow-number">01</span>
-          <h3>Connect</h3>
-          <p>Bring your wallet in. The line wakes up the moment you connect to DCAI L3.</p>
+    <section class="hero-stage">
+      <div class="hero-card" id="heroCard">
+        <span class="hero-badge">ASK · DCAI L3</span>
+        <h1>Connect to begin your survey pass.</h1>
+        <p class="hero-caption">1 tDCAI to mint · NFT holds progress · transfer the NFT, transfer the survey.</p>
+        <div class="hero-actions main-actions">
+          <button id="connectBtn" class="primary-cta">Connect Wallet</button>
+          <button id="switchBtn" class="ghost subtle-btn">Use DCAI L3</button>
+        </div>
+        <p class="micro-info" id="statusText">Waiting for wallet.</p>
+      </div>
+    </section>
+
+    <section class="dashboard-deck">
+      <div class="dashboard-grid">
+        <article class="feature-card feature-wallet">
+          <span class="card-kicker">Card A</span>
+          <h2>Wallet</h2>
+          <div class="metric-stack">
+            <div>
+              <div class="metric-label">Wallet address</div>
+              <div class="metric-value mono" id="walletAddress">Not connected</div>
+            </div>
+            <div>
+              <div class="metric-label">Wallet status</div>
+              <div class="metric-value" id="walletStatus">Disconnected</div>
+            </div>
+          </div>
         </article>
-        <article class="flow-node" data-flow-step="sign">
-          <span class="flow-number">02</span>
-          <h3>Sign</h3>
-          <p>Approve the mint flow and let the survey pass become your movable on-chain key.</p>
+
+        <article class="feature-card feature-mint">
+          <span class="card-kicker">Card B</span>
+          <h2>Mint your pass</h2>
+          <p class="feature-copy">Mint your survey pass at <strong><span id="mintPriceDisplay">1</span> tDCAI</strong> and lock the journey into an NFT.</p>
+          <button id="mintBtn" class="primary-cta" disabled>Mint Survey Pass</button>
+          <p class="micro-info" id="mintHint"></p>
         </article>
-        <article class="flow-node" data-flow-step="survey">
-          <span class="flow-number">03</span>
-          <h3>Survey</h3>
-          <p>Step into the questionnaire, answer at your pace, and come back anytime the NFT is still yours.</p>
+
+        <article class="feature-card feature-start" id="startSurveyCard" hidden>
+          <span class="card-kicker">Card C</span>
+          <h2>Start survey</h2>
+          <p class="feature-copy">Your wallet already holds survey passes. Enter the gallery, pick one, and continue from there.</p>
+          <button id="startSurveyBtn" class="primary-cta alt">Start Survey</button>
         </article>
       </div>
     </section>
 
-    <section class="grid top-grid">
-      <div class="card">
-        <h2>Wallet</h2>
-        <p><strong>Address:</strong> <span id="walletAddress">Not connected</span></p>
-        <p><strong>Network:</strong> <span id="networkName">Unknown</span></p>
-        <p><strong>Status:</strong> <span id="statusText">Loading config…</span></p>
+    <section class="view-panel survey-hub" id="surveyHub">
+      <div class="panel-head">
+        <button id="backToDashboardBtn" class="ghost back-btn">Back</button>
+        <div>
+          <span class="hero-badge">Survey Passes</span>
+          <h2>Your NFTs</h2>
+        </div>
       </div>
-
-      <div class="card">
-        <h2>Mint Survey Pass</h2>
-        <p class="muted">Price: <span id="mintPriceDisplay">1</span> tDCAI</p>
-        <button id="mintBtn" disabled>Mint Survey NFT</button>
-        <button id="demoMintBtn" class="ghost" hidden>Create Demo Survey Pass</button>
-        <p id="mintHint" class="note"></p>
-      </div>
+      <div id="passes" class="pass-grid"></div>
     </section>
 
-    <section class="card">
-      <div class="section-title-row">
-        <h2>My Survey Passes</h2>
-        <button id="refreshBtn" class="ghost">Refresh</button>
-      </div>
-      <div id="passes" class="passes empty">Connect wallet to load your survey NFTs.</div>
-    </section>
-
-    <section id="surveySection" class="card hidden">
-      <div class="section-title-row">
-        <h2 id="surveyTitle">Survey</h2>
+    <section class="view-panel survey-view" id="surveySection">
+      <div class="panel-head">
+        <button id="backToHubBtn" class="ghost back-btn">Back</button>
+        <div>
+          <span class="hero-badge">Survey</span>
+          <h2 id="surveyTitle">Survey Pass</h2>
+        </div>
         <span id="surveyMeta" class="chip"></span>
       </div>
-      <div class="progress-wrap">
-        <div class="progress-bar"><div id="progressBar"></div></div>
-        <p id="progressText" class="note"></p>
-      </div>
-      <div id="questionCard" class="question-card">
+
+      <div class="question-frame card" id="questionCard">
+        <div class="progress-wrap">
+          <div class="progress-bar"><div id="progressBar"></div></div>
+          <p id="progressText" class="micro-info"></p>
+        </div>
+
         <p id="questionLabel" class="eyebrow">Question</p>
         <h3 id="questionTitle">Question 001</h3>
         <p id="questionText" class="question-text">Select a survey pass to continue.</p>
+
         <div class="answer-actions">
           <button data-answer="yes" class="answer yes">YES</button>
           <button data-answer="no" class="answer no">NO</button>
