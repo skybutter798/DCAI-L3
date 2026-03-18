@@ -19,7 +19,6 @@ contract SurveyPassNFT is ERC721Enumerable, Ownable {
 
     constructor(address treasury_, string memory baseUri_)
         ERC721("DCAI Survey Pass", "ASK")
-        Ownable(msg.sender)
     {
         require(treasury_ != address(0), "treasury required");
         treasury = treasury_;

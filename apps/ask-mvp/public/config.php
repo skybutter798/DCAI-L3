@@ -24,9 +24,9 @@ return [
         'totalQuestions' => 100,
         'mintPriceWei' => '1000000000000000000',
         'mintPriceDisplay' => '1',
-        'contractAddress' => '',
-        'allowDemoMint' => true,
-        'demoModeLabel' => 'Demo mint enabled until SurveyPassNFT is deployed',
+        'contractAddress' => '0x5E2D135e411cd14613429711B6501EeD17a6d40E',
+        'allowDemoMint' => false,
+        'demoModeLabel' => 'Live SurveyPassNFT configured',
     ],
     'storage' => [
         'sqlite' => __DIR__ . '/storage/ask.sqlite',
