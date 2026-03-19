@@ -957,7 +957,7 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
 
       function parseContributorNote(note) {
         const text = String(note || '');
-        const lines = text.split(/\r?\n/);
+        const lines = text.replace(/\r/g, '').split('\n');
         const get = (label) => {
           const row = lines.find((line) => line.startsWith(label + ':'));
           return row ? row.slice(label.length + 1).trim() : '';
