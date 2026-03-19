@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
+import ContributorProgram from './ContributorProgram';
 
 function navigateTo(path: string) {
   try {
@@ -91,13 +92,15 @@ const Header = ({
   onBlocks,
   onTxs,
   onTokens,
+  onContributors,
   onDashboard,
 }: {
-  active: 'home' | 'blocks' | 'txs' | 'tx' | 'block' | 'address' | 'tokens' | 'token' | 'dashboard',
+  active: 'home' | 'blocks' | 'txs' | 'tx' | 'block' | 'address' | 'tokens' | 'token' | 'contributors' | 'dashboard',
   onHome: () => void,
   onBlocks: () => void,
   onTxs: () => void,
   onTokens: () => void,
+  onContributors: () => void,
   onDashboard: () => void,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -132,7 +135,7 @@ const Header = ({
           <NavItem label="BLOCKS" isActive={active === 'blocks' || active === 'block'} onClick={() => { setMobileOpen(false); onBlocks(); }} />
           <NavItem label="TRANSACTIONS" isActive={active === 'txs' || active === 'tx'} onClick={() => { setMobileOpen(false); onTxs(); }} />
           <NavItem label="TOKENS" isActive={active === 'tokens' || active === 'token'} onClick={() => { setMobileOpen(false); onTokens(); }} />
-          <NavItem label="NODES" onClick={() => { /* next */ }} />
+          <NavItem label="NODES" isActive={active === 'contributors'} onClick={() => { setMobileOpen(false); onContributors(); }} />
           <NavItem label="API" isActive={active === 'dashboard'} onClick={() => { setMobileOpen(false); onDashboard(); }} />
         </nav>
 
@@ -164,7 +167,7 @@ const Header = ({
               <NavItem label="BLOCKS" isActive={active === 'blocks' || active === 'block'} onClick={() => { setMobileOpen(false); onBlocks(); }} />
               <NavItem label="TRANSACTIONS" isActive={active === 'txs' || active === 'tx'} onClick={() => { setMobileOpen(false); onTxs(); }} />
               <NavItem label="TOKENS" isActive={active === 'tokens' || active === 'token'} onClick={() => { setMobileOpen(false); onTokens(); }} />
-              <NavItem label="NODES" onClick={() => { setMobileOpen(false); }} />
+              <NavItem label="NODES" isActive={active === 'contributors'} onClick={() => { setMobileOpen(false); onContributors(); }} />
               <NavItem label="API" isActive={active === 'dashboard'} onClick={() => { setMobileOpen(false); onDashboard(); }} />
               <button className="mt-2 glow-box px-4 py-2 rounded text-xs font-mono font-bold border-cyan-500/50 text-cyan-300 hover:bg-cyan-500 hover:text-dark-900 transition-all">
                 CONNECT WALLET
@@ -3722,7 +3725,7 @@ const DashboardView = () => {
 };
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'blocks' | 'txs' | 'block' | 'tx' | 'address' | 'tokens' | 'token' | 'dashboard'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'blocks' | 'txs' | 'block' | 'tx' | 'address' | 'tokens' | 'token' | 'contributors' | 'dashboard'>('home');
   const [selectedBlock, setSelectedBlock] = useState<any>(null);
   const [selectedTxHash, setSelectedTxHash] = useState<string | null>(null);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
@@ -3751,6 +3754,11 @@ export default function App() {
 
         if (path === '/dashboard' || path === '/dashboard/') {
           setCurrentView('dashboard');
+          return;
+        }
+
+        if (path === '/contributors' || path === '/contributors/' || path === '/nodes' || path === '/nodes/') {
+          setCurrentView('contributors');
           return;
         }
 
@@ -4119,6 +4127,7 @@ export default function App() {
         onBlocks={() => { setCurrentView('blocks'); try { window.history.pushState({ view: 'blocks' }, '', '/blocks'); } catch {} }}
         onTxs={() => { setCurrentView('txs'); try { window.history.pushState({ view: 'txs' }, '', '/txs'); } catch {} }}
         onTokens={() => { setCurrentView('tokens'); try { window.history.pushState({ view: 'tokens' }, '', '/tokens'); } catch {} }}
+        onContributors={() => { setCurrentView('contributors'); try { window.history.pushState({ view: 'contributors' }, '', '/contributors'); } catch {} }}
         onDashboard={() => { setCurrentView('dashboard'); try { window.history.pushState({ view: 'dashboard' }, '', '/dashboard'); } catch {} }}
       />
       
@@ -4377,6 +4386,8 @@ export default function App() {
             onViewToken={(a: string) => handleViewToken(a)}
             onViewAddress={(a: string) => handleViewAddress(a)}
           />
+        ) : currentView === 'contributors' ? (
+          <ContributorProgram key="contributors" />
         ) : currentView === 'dashboard' ? (
           <DashboardView key="dashboard" />
         ) : currentView === 'token' ? (
