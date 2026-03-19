@@ -367,7 +367,7 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
             <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
                     <h2 class="text-xl font-bold text-white">API Key Approvals</h2>
-                    <p class="text-slate-500 text-xs mt-1">Stake-gated requests (manual approve / revoke)</p>
+                    <p class="text-slate-500 text-xs mt-1">Stake-gated requests for app plans + ecosystem contributors (approve / reject / revoke)</p>
                 </div>
                 <div class="flex flex-wrap gap-2 items-center">
                     <div class="px-3 py-2 rounded-2xl border border-slate-700 bg-slate-950 text-[10px] font-mono text-slate-400">Signed in via Basic Auth</div>
@@ -915,6 +915,24 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         }
       }
 
+      function parseContributorNote(note) {
+        const text = String(note || '');
+        const lines = text.split(/\r?\n/);
+        const get = (label) => {
+          const row = lines.find((line) => line.startsWith(label + ':'));
+          return row ? row.slice(label.length + 1).trim() : '';
+        };
+        return {
+          isContributor: lines[0] === 'Contributor Program Application',
+          role: get('Role'),
+          programTier: get('Program Tier'),
+          internalTier: get('Internal Tier'),
+          region: get('Region'),
+          endpoint: get('Endpoint'),
+          freeNote: get('Note'),
+        };
+      }
+
       function renderApiKeyRequests(reqs) {
         const el = document.getElementById('apiKeyRequestsTable');
         if (!el) return;
@@ -935,16 +953,28 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
           const stakeWei = r.stakeWei || '';
           const created = r.createdAt || '';
           const note = r.note || '';
+          const meta = parseContributorNote(note);
+          const safeTitle = note.replace(/"/g,'&quot;');
 
-          html += '<tr class="hover:bg-slate-800/20">';
+          html += '<tr class="hover:bg-slate-800/20 align-top">';
           html += '<td class="py-2 pr-4 font-mono text-slate-300">' + id + '</td>';
           html += '<td class="py-2 pr-4 font-mono text-yellow-500 cursor-pointer" data-copy="' + addr + '">' + (addr ? (addr.slice(0, 10) + '…' + addr.slice(-6)) : '') + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-300 font-bold">' + tier + '</td>';
+          html += '<td class="py-2 pr-4 text-slate-300 font-bold">' + tier + (meta.isContributor ? '<div class="mt-1 text-[10px] text-cyan-400">contributor</div>' : '') + '</td>';
           html += '<td class="py-2 pr-4 font-mono text-slate-500">' + stakeWei + '</td>';
           html += '<td class="py-2 pr-4 text-slate-500">' + String(created).replace('T',' ').replace('Z','') + '</td>';
           html += '<td class="py-2">' +
-            '<button class="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-emerald-500/20 hover:bg-emerald-500/20" data-approve="' + id + '">APPROVE</button>' +
-            (note ? ('<div class="mt-1 text-[10px] text-slate-500 truncate max-w-[520px]" title="' + note.replace(/"/g,'&quot;') + '">' + note + '</div>') : '') +
+            '<div class="flex flex-wrap gap-2">' +
+              '<button class="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-emerald-500/20 hover:bg-emerald-500/20" data-approve="' + id + '">APPROVE</button>' +
+              '<button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-rose-500/20 hover:bg-rose-500/20" data-reject="' + id + '">REJECT</button>' +
+            '</div>' +
+            (meta.isContributor
+              ? ('<div class="mt-2 space-y-1 text-[10px] text-slate-400">' +
+                  '<div><span class="text-slate-500">role</span> ' + (meta.role || '-') + ' · <span class="text-slate-500">program</span> ' + (meta.programTier || '-') + '</div>' +
+                  '<div><span class="text-slate-500">region</span> ' + (meta.region || '-') + '</div>' +
+                  '<div class="truncate max-w-[520px]" title="' + safeTitle + '"><span class="text-slate-500">endpoint</span> ' + (meta.endpoint || '-') + '</div>' +
+                  (meta.freeNote && meta.freeNote !== '-' ? ('<div class="truncate max-w-[520px]" title="' + safeTitle + '"><span class="text-slate-500">note</span> ' + meta.freeNote + '</div>') : '') +
+                '</div>')
+              : (note ? ('<div class="mt-1 text-[10px] text-slate-500 truncate max-w-[520px]" title="' + safeTitle + '">' + note + '</div>') : '')) +
             '</td>';
           html += '</tr>';
         }
@@ -958,6 +988,9 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
           });
           Array.from(el.querySelectorAll('[data-approve]')).forEach(function(b){
             b.addEventListener('click', function(){ approveApiKey(b.getAttribute('data-approve')); });
+          });
+          Array.from(el.querySelectorAll('[data-reject]')).forEach(function(b){
+            b.addEventListener('click', function(){ rejectApiKey(b.getAttribute('data-reject')); });
           });
         } catch (e) {}
       }
@@ -997,6 +1030,28 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         } catch (e) {
           if (st) st.textContent = 'Approve failed: ' + (e?.message || e);
           alert('Approve failed: ' + (e?.message || e));
+        }
+      }
+
+      async function rejectApiKey(id) {
+        const reason = prompt('Reject request ' + id + '. Optional reason:') || '';
+        if (!confirm('Reject request ' + id + '?')) return;
+        const st = document.getElementById('apiKeyReqStatus');
+        if (st) st.textContent = 'Rejecting…';
+        try {
+          const r = await adminFetch('/apikey/reject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id, reason: reason })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error || 'reject failed');
+          if (st) st.textContent = 'Rejected ' + id;
+          refreshAdminData();
+          loadApiKeyRequests();
+        } catch (e) {
+          if (st) st.textContent = 'Reject failed: ' + (e?.message || e);
+          alert('Reject failed: ' + (e?.message || e));
         }
       }
 

@@ -546,6 +546,29 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ---------- Admin: reject request ----------
+  if ((pathname === '/api/apikey/reject' || pathname === '/apikey/reject') && req.method === 'POST') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
+    try {
+      const body = JSON.parse(await readBody(req));
+      const requestId = String(body?.id || '');
+      const reason = String(body?.reason || '').slice(0, 500);
+      const requests = loadJson(REQ_PATH, []);
+      const r = requests.find((x) => x.id === requestId);
+      if (!r) return sendJson(res, 404, { error: 'request not found' });
+      if (r.status !== 'pending') return sendJson(res, 400, { error: 'not pending', request: r });
+
+      r.status = 'rejected';
+      r.rejectedAt = new Date().toISOString();
+      if (reason) r.rejectReason = reason;
+      saveJson(REQ_PATH, requests);
+
+      return sendJson(res, 200, { ok: true, id: r.id, address: r.address, tier: r.tier, reason: r.rejectReason || '' });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || String(e) });
+    }
+  }
+
   // ---------- Admin: revoke key ----------
   if ((pathname === '/api/apikey/revoke' || pathname === '/apikey/revoke') && req.method === 'POST') {
     if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
