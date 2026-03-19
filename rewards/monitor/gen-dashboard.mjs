@@ -1370,6 +1370,21 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         loadApiKeyRequests();
         loadStakeWatch();
       }
+
+      window.copyText = copyText;
+      window.topup = topup;
+      window.customTopup = customTopup;
+      window.openLatestRewards = openLatestRewards;
+      window.closeLatestRewards = closeLatestRewards;
+      window.increaseCap = increaseCap;
+      window.setCap = setCap;
+      window.saveWeights = saveWeights;
+      window.refreshAdminData = refreshAdminData;
+      window.revokeKey = revokeKey;
+      window.loadApiKeyKeys = loadApiKeyKeys;
+      window.loadStakeWatch = loadStakeWatch;
+      window.changeAdminPassword = changeAdminPassword;
+
       document.addEventListener('click', function(e) {
         var modal = document.getElementById('latestRewardsModal');
         if (!modal.classList.contains('hidden') && e.target === modal) {
