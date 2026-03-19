@@ -1211,7 +1211,7 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
           });
           const d = await r.json();
           if (!d.ok) throw new Error(d.error || 'rotate failed');
-          alert('Rotated!\nTier: ' + d.tier + '\nAddress: ' + d.address + '\nNew API Key: ' + d.key);
+          alert('Rotated!\\nTier: ' + d.tier + '\\nAddress: ' + d.address + '\\nNew API Key: ' + d.key);
           if (st) st.textContent = 'Rotated ' + (keyPrefix || id) + '.';
           loadApiKeyKeys();
           loadStakeWatch();
