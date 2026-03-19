@@ -593,6 +593,46 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ---------- Admin: rotate key ----------
+  if ((pathname === '/api/apikey/rotate' || pathname === '/apikey/rotate') && req.method === 'POST') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
+    try {
+      const body = JSON.parse(await readBody(req));
+      const id = String(body?.id || '').trim();
+      if (!id) return sendJson(res, 400, { error: 'missing id' });
+      const keys = loadJson(KEYS_PATH, []);
+      const current = keys.find((x) => x.active && String(x.id || '') === id);
+      if (!current) return sendJson(res, 404, { error: 'active key not found' });
+
+      current.active = false;
+      current.revokedAt = new Date().toISOString();
+      current.rotated = true;
+
+      const newKey = genKey32();
+      const next = {
+        id: randomBytes(8).toString('hex'),
+        address: current.address,
+        tier: current.tier,
+        key: newKey,
+        active: true,
+        createdAt: new Date().toISOString(),
+        replacesId: current.id,
+      };
+      current.rotatedToId = next.id;
+      keys.push(next);
+
+      saveJson(KEYS_PATH, keys);
+      writeNginxKeyFile('basic', keys);
+      writeNginxKeyFile('pro', keys);
+      writeNginxKeyFile('ultra', keys);
+      reloadNginx();
+
+      return sendJson(res, 200, { ok: true, oldId: current.id, newId: next.id, key: newKey, address: next.address, tier: next.tier });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || String(e) });
+    }
+  }
+
   // ---------- Admin: list keys ----------
   if ((pathname === '/api/apikey/keys' || pathname === '/apikey/keys') && req.method === 'GET') {
     if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });

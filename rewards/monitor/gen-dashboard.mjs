@@ -376,12 +376,31 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
             </div>
 
             <div id="apiKeyReqStatus" class="mt-3 text-[10px] font-mono text-slate-500"></div>
+            <div class="mt-3 flex flex-wrap gap-2 items-center">
+                <input id="requestSearchInput" placeholder="Search wallet / endpoint / note" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono w-[320px]" />
+                <select id="requestFilterSelect" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono text-slate-300">
+                    <option value="all">All pending</option>
+                    <option value="contributor">Contributor only</option>
+                    <option value="app">App/API only</option>
+                </select>
+            </div>
             <div id="apiKeyRequestsTable" class="mt-4"></div>
 
             <div class="mt-6 pt-4 border-t border-slate-800/50">
-                <div class="text-xs font-bold text-slate-300">Revoke Key (paste full key)</div>
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                    <div>
+                        <div class="text-xs font-bold text-slate-300">Request History</div>
+                        <div class="text-[10px] font-mono text-slate-500 mt-1">Recent approved / rejected / pending requests</div>
+                    </div>
+                </div>
+                <div id="apiKeyRequestHistoryTable" class="mt-3"></div>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-slate-800/50">
+                <div class="text-xs font-bold text-slate-300">Key Controls</div>
                 <div class="mt-2 flex flex-wrap gap-2 items-center">
-                    <input id="revokeKeyInput" placeholder="32-hex key" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono w-[320px]" />
+                    <input id="revokeKeyInput" placeholder="32-hex key" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono w-[240px]" />
+                    <input id="keySearchInput" placeholder="Search key prefix / wallet" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono w-[240px]" />
                     <button onclick="revokeKey()" class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-2 rounded-2xl border border-rose-500/20 hover:bg-rose-500/20 transition">REVOKE</button>
                     <button onclick="loadApiKeyKeys()" class="bg-slate-800 hover:bg-slate-700 text-[10px] font-bold px-3 py-2 rounded-2xl border border-slate-700 transition">LIST KEYS</button>
                 </div>
@@ -915,6 +934,27 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         }
       }
 
+      let apiKeyRequestsCache = [];
+      let apiKeyKeysCache = [];
+
+      function initApiKeyControls() {
+        const reqSearch = document.getElementById('requestSearchInput');
+        if (reqSearch && !reqSearch.dataset.bound) {
+          reqSearch.dataset.bound = '1';
+          reqSearch.addEventListener('input', function(){ renderApiKeyRequestsFromCache(); });
+        }
+        const reqFilter = document.getElementById('requestFilterSelect');
+        if (reqFilter && !reqFilter.dataset.bound) {
+          reqFilter.dataset.bound = '1';
+          reqFilter.addEventListener('change', function(){ renderApiKeyRequestsFromCache(); });
+        }
+        const keySearch = document.getElementById('keySearchInput');
+        if (keySearch && !keySearch.dataset.bound) {
+          keySearch.dataset.bound = '1';
+          keySearch.addEventListener('input', function(){ renderApiKeyKeys(apiKeyKeysCache); });
+        }
+      }
+
       function parseContributorNote(note) {
         const text = String(note || '');
         const lines = text.split(/\r?\n/);
@@ -995,17 +1035,69 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         } catch (e) {}
       }
 
+      function renderApiKeyRequestHistory(rows) {
+        const el = document.getElementById('apiKeyRequestHistoryTable');
+        if (!el) return;
+        if (!Array.isArray(rows) || rows.length === 0) {
+          el.innerHTML = '<div class="text-[11px] text-slate-500 font-mono">No request history.</div>';
+          return;
+        }
+        const sorted = rows.slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 30);
+        let html = '<div class="overflow-x-auto"><table class="w-full text-left text-[11px]">';
+        html += '<thead class="text-slate-500 uppercase tracking-widest text-[10px] bg-slate-900/50"><tr>';
+        html += '<th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Type</th><th class="py-2 pr-4">Status</th><th class="py-2">Created</th>';
+        html += '</tr></thead><tbody class="divide-y divide-slate-800/50">';
+        for (const r of sorted) {
+          const meta = parseContributorNote(r.note || '');
+          const addr = r.address || '';
+          const status = r.status || 'pending';
+          const statusCls = status === 'approved' ? 'text-emerald-400' : status === 'rejected' ? 'text-rose-400' : 'text-yellow-400';
+          html += '<tr class="hover:bg-slate-800/20">';
+          html += '<td class="py-2 pr-4 font-mono text-yellow-500 cursor-pointer" data-copy="' + addr + '">' + (addr ? (addr.slice(0, 10) + '…' + addr.slice(-6)) : '') + '</td>';
+          html += '<td class="py-2 pr-4 text-slate-300">' + (r.tier || '') + '</td>';
+          html += '<td class="py-2 pr-4 text-slate-500">' + (meta.isContributor ? 'contributor' : 'app/api') + '</td>';
+          html += '<td class="py-2 pr-4 font-bold ' + statusCls + '">' + status + '</td>';
+          html += '<td class="py-2 text-slate-500">' + String(r.createdAt || '').replace('T',' ').replace('Z','') + '</td>';
+          html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
+        try {
+          Array.from(el.querySelectorAll('[data-copy]')).forEach(function(x){
+            x.addEventListener('click', function(){ copyText(x.getAttribute('data-copy')); });
+          });
+        } catch (e) {}
+      }
+
+      function renderApiKeyRequestsFromCache() {
+        initApiKeyControls();
+        const q = String((document.getElementById('requestSearchInput') || {}).value || '').toLowerCase().trim();
+        const mode = String((document.getElementById('requestFilterSelect') || {}).value || 'all');
+        const pending = (apiKeyRequestsCache || []).filter(x => x.status === 'pending').filter(function(r){
+          const meta = parseContributorNote(r.note || '');
+          if (mode === 'contributor' && !meta.isContributor) return false;
+          if (mode === 'app' && meta.isContributor) return false;
+          if (!q) return true;
+          const hay = [r.address, r.tier, r.note, meta.role, meta.region, meta.endpoint, meta.programTier].join(' ').toLowerCase();
+          return hay.includes(q);
+        });
+        renderApiKeyRequests(pending);
+        renderApiKeyRequestHistory(apiKeyRequestsCache || []);
+      }
+
       async function loadApiKeyRequests() {
         initAdminTokenInput();
+        initApiKeyControls();
         const st = document.getElementById('apiKeyReqStatus');
         if (st) st.textContent = 'Loading requests…';
         try {
           const r = await adminFetch('/apikey/requests', { method: 'GET' });
           const d = await r.json();
           if (!d.ok) throw new Error(d.error || 'failed');
-          const pending = (d.requests || []).filter(x => x.status === 'pending');
-          renderApiKeyRequests(pending);
-          if (st) st.textContent = 'Loaded ' + pending.length + ' pending request(s).';
+          apiKeyRequestsCache = d.requests || [];
+          renderApiKeyRequestsFromCache();
+          const pendingCount = apiKeyRequestsCache.filter(x => x.status === 'pending').length;
+          if (st) st.textContent = 'Loaded ' + pendingCount + ' pending request(s).';
         } catch (e) {
           if (st) st.textContent = 'Load failed: ' + (e?.message || e);
         }
@@ -1105,10 +1197,40 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         }
       }
 
+      async function rotateKeyById(id, keyPrefix) {
+        initAdminTokenInput();
+        if (!id) return;
+        if (!confirm('Rotate key ' + (keyPrefix || id) + '? Old key will be revoked and a new key will be issued.')) return;
+        const st = document.getElementById('apiKeyReqStatus');
+        if (st) st.textContent = 'Rotating…';
+        try {
+          const r = await adminFetch('/apikey/rotate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error || 'rotate failed');
+          alert('Rotated!\nTier: ' + d.tier + '\nAddress: ' + d.address + '\nNew API Key: ' + d.key);
+          if (st) st.textContent = 'Rotated ' + (keyPrefix || id) + '.';
+          loadApiKeyKeys();
+          loadStakeWatch();
+        } catch (e) {
+          if (st) st.textContent = 'Rotate failed: ' + (e?.message || e);
+          alert('Rotate failed: ' + (e?.message || e));
+        }
+      }
+
       function renderApiKeyKeys(keys) {
         const el = document.getElementById('apiKeyKeysTable');
         if (!el) return;
-        if (!Array.isArray(keys) || keys.length === 0) {
+        const q = String((document.getElementById('keySearchInput') || {}).value || '').toLowerCase().trim();
+        const rows = (Array.isArray(keys) ? keys : []).filter(function(k){
+          if (!q) return true;
+          const hay = [k.keyPrefix, k.address, k.tier, k.status].join(' ').toLowerCase();
+          return hay.includes(q);
+        });
+        if (rows.length === 0) {
           el.innerHTML = '<div class="text-[11px] text-slate-500 font-mono">No keys.</div>';
           return;
         }
@@ -1116,15 +1238,18 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         html += '<thead class="text-slate-500 uppercase tracking-widest text-[10px] bg-slate-900/50"><tr>';
         html += '<th class="py-2 pr-4">KeyPrefix</th><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Status</th><th class="py-2 pr-4">Created</th><th class="py-2">Action</th>';
         html += '</tr></thead><tbody class="divide-y divide-slate-800/50">';
-        for (const k of keys) {
+        for (const k of rows) {
           html += '<tr class="hover:bg-slate-800/20">';
           html += '<td class="py-2 pr-4 font-mono text-slate-300">' + (k.keyPrefix || '') + '</td>';
-          html += '<td class="py-2 pr-4 font-mono text-slate-500">' + (k.address ? (k.address.slice(0,10) + '…' + k.address.slice(-6)) : '') + '</td>';
+          html += '<td class="py-2 pr-4 font-mono text-yellow-500 cursor-pointer" data-copy="' + (k.address || '') + '">' + (k.address ? (k.address.slice(0,10) + '…' + k.address.slice(-6)) : '') + '</td>';
           html += '<td class="py-2 pr-4 text-slate-300 font-bold">' + (k.tier || '') + '</td>';
           html += '<td class="py-2 pr-4 ' + (k.status === 'active' ? 'text-emerald-400' : 'text-slate-500') + ' font-bold">' + (k.status || '') + '</td>';
           html += '<td class="py-2 pr-4 text-slate-500">' + String(k.createdAt || '').replace('T',' ').replace('Z','') + '</td>';
           html += '<td class="py-2">' + (k.status === 'active'
-            ? ('<button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-rose-500/20 hover:bg-rose-500/20" data-revoke-id="' + (k.id || '') + '" data-revoke-prefix="' + (k.keyPrefix || '') + '">REVOKE</button>')
+            ? ('<div class="flex flex-wrap gap-2">' +
+                '<button class="bg-cyan-500/10 text-cyan-300 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-cyan-500/20 hover:bg-cyan-500/20" data-rotate-id="' + (k.id || '') + '" data-rotate-prefix="' + (k.keyPrefix || '') + '">ROTATE</button>' +
+                '<button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-rose-500/20 hover:bg-rose-500/20" data-revoke-id="' + (k.id || '') + '" data-revoke-prefix="' + (k.keyPrefix || '') + '">REVOKE</button>' +
+              '</div>')
             : '<span class="text-slate-600 font-mono">-</span>') + '</td>';
           html += '</tr>';
         }
@@ -1132,19 +1257,27 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
         el.innerHTML = html;
 
         try {
+          Array.from(el.querySelectorAll('[data-copy]')).forEach(function(x){
+            x.addEventListener('click', function(){ copyText(x.getAttribute('data-copy')); });
+          });
           Array.from(el.querySelectorAll('[data-revoke-id]')).forEach(function(b){
             b.addEventListener('click', function(){ revokeKeyById(b.getAttribute('data-revoke-id'), b.getAttribute('data-revoke-prefix')); });
+          });
+          Array.from(el.querySelectorAll('[data-rotate-id]')).forEach(function(b){
+            b.addEventListener('click', function(){ rotateKeyById(b.getAttribute('data-rotate-id'), b.getAttribute('data-rotate-prefix')); });
           });
         } catch (e) {}
       }
 
       async function loadApiKeyKeys() {
         initAdminTokenInput();
+        initApiKeyControls();
         try {
           const r = await adminFetch('/apikey/keys', { method: 'GET' });
           const d = await r.json();
           if (!d.ok) throw new Error(d.error || 'failed');
-          renderApiKeyKeys(d.keys || []);
+          apiKeyKeysCache = d.keys || [];
+          renderApiKeyKeys(apiKeyKeysCache);
         } catch (e) {
           const el = document.getElementById('apiKeyKeysTable');
           if (el) el.innerHTML = '<div class="text-[11px] text-rose-400 font-mono">Load keys failed: ' + (e?.message || e) + '</div>';
