@@ -217,9 +217,26 @@ function usageForKey(key) {
 }
 
 function isAdmin(req) {
-  // Admin access is enforced by nginx Basic Auth on /admin/ and /admin/api/.
-  // The Node API listens on 127.0.0.1 only, so requests should arrive via nginx.
-  return true;
+  // Defense in depth. Admin actions require the shared secret that nginx
+  // injects as X-Admin-Token on the /admin/api/ location (which itself sits
+  // behind Basic Auth); the Node API also binds to 127.0.0.1 only. When
+  // ADMIN_TOKEN is unset we fall back to allow (bootstrap/dev) but warn, so
+  // nothing breaks before nginx is wired up.
+  if (!ADMIN_TOKEN) {
+    console.error('[admin-api] WARNING: ADMIN_TOKEN unset — admin endpoints are not token-gated');
+    return true;
+  }
+  const got = req.headers['x-admin-token'] || req.headers['X-Admin-Token'] || '';
+  return got === ADMIN_TOKEN;
+}
+
+// Which frontend a key/request came from. The Contributor Program stamps a
+// recognisable first line into the note; everything else is a developer
+// (API Dashboard) request. There is only ONE staking system behind both.
+function sourceFromNote(note) {
+  return String(note || '').startsWith('Contributor Program Application')
+    ? 'contributor'
+    : 'developer';
 }
 
 function normAddress(a) {
@@ -435,6 +452,7 @@ const server = http.createServer(async (req, res) => {
         address: addr.toLowerCase(),
         tier,
         note,
+        source: sourceFromNote(note),
         createdAt: new Date().toISOString(),
         status: 'pending',
         stakeWei: stake.stakeWei,
@@ -496,7 +514,7 @@ const server = http.createServer(async (req, res) => {
   // ---------- Admin: list requests ----------
   if ((pathname === '/api/apikey/requests' || pathname === '/apikey/requests') && req.method === 'GET') {
     if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
-    const requests = loadJson(REQ_PATH, []);
+    const requests = loadJson(REQ_PATH, []).map((r) => ({ ...r, source: r.source || sourceFromNote(r.note) }));
     return sendJson(res, 200, { ok: true, requests });
   }
 
@@ -523,6 +541,7 @@ const server = http.createServer(async (req, res) => {
         address: r.address,
         tier: r.tier,
         key: newKey,
+        source: r.source || sourceFromNote(r.note),
         active: true,
         createdAt: new Date().toISOString(),
       };
@@ -637,7 +656,7 @@ const server = http.createServer(async (req, res) => {
   if ((pathname === '/api/apikey/keys' || pathname === '/apikey/keys') && req.method === 'GET') {
     if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
     const keys = loadJson(KEYS_PATH, []);
-    return sendJson(res, 200, { ok: true, keys: keys.map(({ key, ...rest }) => ({ ...rest, keyPrefix: key.slice(0, 6) })) });
+    return sendJson(res, 200, { ok: true, keys: keys.map(({ key, ...rest }) => ({ ...rest, source: rest.source || 'developer', keyPrefix: key.slice(0, 6) })) });
   }
 
   // ---------- Admin: usage summary ----------
@@ -677,26 +696,59 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // --- Update weights ---
+  // --- Update reward weights (4-key model; consumed live by score-to-claims) ---
   if ((pathname === '/api/update-weights' || pathname === '/update-weights') && req.method === 'POST') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
     const body = await readBody(req);
     try {
-      const newWeights = JSON.parse(body || '{}');
+      const w = JSON.parse(body || '{}');
       const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      const num = (v, def) => {
+        const n = Number(v);
+        return Number.isFinite(n) && n >= 0 ? n : def;
+      };
+      const previous = config.weights || {};
       config.weights = {
-        rpc: parseFloat(newWeights.rpc) || 0.4,
-        storage: parseFloat(newWeights.storage) || 0.3,
-        indexer: parseFloat(newWeights.indexer) || 0.3
+        rpc: num(w.rpc, 40),
+        indexer: num(w.indexer, 20),
+        storage: num(w.storage, 30),
+        multiregion: num(w.multiregion, 10),
       };
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
-      return sendJson(res, 200, { success: true, weights: config.weights });
+      return sendJson(res, 200, { success: true, weights: config.weights, previous });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
     }
   }
 
+  // --- Legacy master API keys (defined in the nginx map, not managed here) ---
+  if ((pathname === '/api/legacy-keys' || pathname === '/legacy-keys') && req.method === 'GET') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
+    try {
+      const confPaths = [
+        '/etc/nginx/sites-available/dcai-testnet',
+        '/etc/nginx/sites-enabled/dcai-testnet',
+      ];
+      let conf = '';
+      for (const p of confPaths) {
+        try { conf = fs.readFileSync(p, 'utf8'); break; } catch {}
+      }
+      const keys = [];
+      const block = conf.match(/map\s+\$http_x_api_key\s+\$rpc_key_ok\s*\{([\s\S]*?)\}/);
+      if (block) {
+        const re = /"([0-9a-fA-F]{32})"\s+1\s*;/g;
+        let mm;
+        while ((mm = re.exec(block[1]))) keys.push(mm[1]);
+      }
+      return sendJson(res, 200, { ok: true, keys, note: 'Defined in nginx map $http_x_api_key; unstaked master keys, not part of the staking system.' });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
   // --- Topup distributor ---
   if ((pathname === '/api/topup' || pathname === '/topup') && req.method === 'POST') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
     const body = await readBody(req);
     try {
       const { amount } = JSON.parse(body || '{}');
@@ -738,6 +790,7 @@ const server = http.createServer(async (req, res) => {
 
   // --- Set daily cap (project owner) ---
   if ((pathname === '/api/set-cap' || pathname === '/set-cap') && req.method === 'POST') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
     const body = await readBody(req);
     try {
       if (!PRIVATE_KEY) throw new Error('FOUNDATION_KEY not set');

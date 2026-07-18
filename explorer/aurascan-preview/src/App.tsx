@@ -430,7 +430,7 @@ const HomeView = ({
           chainId {CHAIN_ID} · {NATIVE_SYMBOL} · Clique PoA · ~2s blocks
         </div>
       </div>
-      <div className="text-[11px] font-mono text-txt-3">AuraScan</div>
+      <div className="text-[11px] font-mono text-txt-3">Testnet</div>
     </div>
 
     <ChainPulse blocks={blocks} />
@@ -2561,7 +2561,7 @@ export default function App() {
               <Badge tone="cyan">testnet</Badge>
             </div>
             <div className="mt-2 text-[11px] font-mono text-txt-3 leading-5">
-              AuraScan — the DCAI L3 explorer.<br />
+              The DCAI L3 block explorer.<br />
               chainId {CHAIN_ID} · {NATIVE_SYMBOL} · Clique PoA · Geth v1.13.15
             </div>
           </div>

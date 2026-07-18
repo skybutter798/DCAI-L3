@@ -12,13 +12,13 @@ const INFRA = [
   { name: 'Signer 3 (Sealer)', ip: '45.76.145.198', role: 'Consensus', type: 'Core' },
   { name: 'RPC 1 (Gateway)', ip: '139.180.188.61', role: 'API/HTTP', type: 'Gate' },
   { name: 'RPC 2 (Gateway)', ip: '207.148.72.238', role: 'API/HTTP', type: 'Gate' },
-  { name: "Indexer Node", ip: "139.180.141.226", role: "Indexer", type: "L3" },
+  { name: 'Indexer Node', ip: '139.180.141.226', role: 'Indexer', type: 'L3' },
   { name: 'Infra (Explorer/Faucet)', ip: '139.180.140.143', role: 'Public UI', type: 'Hub' }
 ];
 
 async function main() {
   const provider = new ethers.JsonRpcProvider(RPC_URL);
-  
+
   let treasuryBal = 0n;
   let distributorBal = 0n;
   let blockNumber = 0;
@@ -26,50 +26,45 @@ async function main() {
     treasuryBal = await provider.getBalance(TREASURY_ADDR);
     distributorBal = await provider.getBalance(DISTRIBUTOR_ADDR);
     blockNumber = await provider.getBlockNumber();
-  } catch(e) { console.error('Balance check failed', e); }
-  
+  } catch (e) { console.error('Balance check failed', e); }
+
   const config = JSON.parse(fs.readFileSync('/opt/dcai/rewards/monitor/config.json', 'utf8'));
-  
+
   let measurements = { epochId: 'N/A', dayId: 'N/A', operators: [] };
-  const possiblePaths = [
-    '/opt/dcai/rewards/monitor/measurements.json',
-    '/opt/dcai/rewards/inbox/measurements.json'
-  ];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      measurements = JSON.parse(fs.readFileSync(p, 'utf8'));
-      break;
-    }
+  for (const p of ['/opt/dcai/rewards/monitor/measurements.json', '/opt/dcai/rewards/inbox/measurements.json']) {
+    if (fs.existsSync(p)) { measurements = JSON.parse(fs.readFileSync(p, 'utf8')); break; }
   }
 
-  // latest published rewards (off-chain mirror)
   let latestRewards = null;
-  try {
-    latestRewards = JSON.parse(fs.readFileSync('/var/www/html/rewards/latest.json', 'utf8'));
-  } catch (e) {
-    latestRewards = null;
-  }
+  try { latestRewards = JSON.parse(fs.readFileSync('/var/www/html/rewards/latest.json', 'utf8')); } catch (e) { latestRewards = null; }
   const latestEpochId = latestRewards?.epochId ?? 'N/A';
-  const latestDayId = latestRewards?.dayId ?? 'N/A';
   const latestTotalWei = latestRewards?.totalWei ? BigInt(latestRewards.totalWei) : 0n;
 
+  // 4-key canonical weights. Fall back per-key so a stale 3-key config still renders.
+  const n = (v, d) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? x : d; };
+  const rawW = config.weights || {};
+  const W = { rpc: n(rawW.rpc, 40), indexer: n(rawW.indexer, 20), storage: n(rawW.storage, 30), multiregion: n(rawW.multiregion, 10) };
+  const wSum = (W.rpc + W.indexer + W.storage + W.multiregion) || 1;
+  const wPct = (v) => ((v / wSum) * 100).toFixed(0);
 
-const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
-    const distAbi = [
-    "function dailyCapWei() view returns (uint256)",
-    "function dailySpentWei(uint256 dayId) view returns (uint256)"
+  const distAbi = [
+    'function dailyCapWei() view returns (uint256)',
+    'function dailySpentWei(uint256 dayId) view returns (uint256)'
   ];
   const dist = new ethers.Contract(DISTRIBUTOR_ADDR, distAbi, provider);
-  const dayId = Number(measurements.dayId) || (new Date().toISOString().slice(0,10).replaceAll("-",""));
+  const dayId = Number(measurements.dayId) || Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
   let dailyCapWei = 0n;
   let dailySpentWei = 0n;
   try {
     dailyCapWei = BigInt(await dist.dailyCapWei());
     dailySpentWei = BigInt(await dist.dailySpentWei(dayId));
-  } catch (e) { console.error("cap read failed", e); }
+  } catch (e) { console.error('cap read failed', e); }
   const dailyRemainWei = dailyCapWei - dailySpentWei;
+  const capNum = Number(ethers.formatEther(dailyCapWei)) || 0;
+  const spentNum = Number(ethers.formatEther(dailySpentWei)) || 0;
+  const spentPct = capNum > 0 ? Math.min(100, (spentNum / capNum) * 100) : 0;
 
-  // Recent published epochs (on-chain events), last 10 for current day
+  // Recent published epochs (on-chain events), today only
   let recentRewardEpochIds = [];
   try {
     const iface = new ethers.Interface([
@@ -83,1320 +78,560 @@ const weights = config.weights || { rpc: 0.4, storage: 0.3, indexer: 0.3 };
     const items = [];
     for (const log of logs) {
       const parsed = iface.parseLog(log);
-      const eDayId = BigInt(parsed.args.dayId.toString());
-      if (eDayId !== todayDayId) continue;
-      const eEpochId = parsed.args.epochId.toString();
-      items.push(eEpochId);
+      if (BigInt(parsed.args.dayId.toString()) !== todayDayId) continue;
+      items.push(parsed.args.epochId.toString());
     }
-    recentRewardEpochIds = Array.from(new Set(items)).sort().reverse().slice(0, 10);
-  } catch (e) {
-    recentRewardEpochIds = [];
-  }
+    recentRewardEpochIds = Array.from(new Set(items)).sort().reverse().slice(0, 12);
+  } catch (e) { recentRewardEpochIds = []; }
 
-  const format2 = (wei) => {
-    try { return Number(ethers.formatEther(wei)).toFixed(2); } catch { return "--"; }
-  };
+  const fmt4 = (wei) => { try { const p = ethers.formatEther(wei).split('.'); return p.length === 1 ? p[0] : p[0] + '.' + p[1].slice(0, 4); } catch { return '--'; } };
+  const fmt2 = (wei) => { try { return Number(ethers.formatEther(wei)).toFixed(2); } catch { return '--'; } };
+  const epochsToday = recentRewardEpochIds.length;
 
-  const formatBalance = (val) => {
-    const ether = ethers.formatEther(val);
-    const parts = ether.split('.');
-    if (parts.length === 1) return parts[0];
-    return parts[0] + '.' + parts[1].slice(0, 4);
-  };
+  // Merge config operators with any measured scores for the Operators table
+  const opRows = (config.operators || []).map((op) => {
+    const meas = (measurements.operators || []).find((m) => String(m.operator).toLowerCase() === String(op.operator).toLowerCase());
+    const svc = op.services || {};
+    const enabled = Object.entries(svc).filter(([, v]) => v).map(([k]) => k);
+    return { operator: op.operator, services: svc, enabled, endpoints: op.endpoints || {}, hasMeasurement: !!meas };
+  });
+
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const shortAddr = (a) => a ? (a.slice(0, 8) + '…' + a.slice(-6)) : '--';
 
   const html = `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>DCAI Foundation Control</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-        .font-mono { font-family: 'Space Mono', monospace; letter-spacing: -0.02em; }
-        input[type=range] { -webkit-appearance: none; background: transparent; }
-        input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            height: 18px;
-            width: 18px;
-            border-radius: 50%;
-            background: #eab308;
-            cursor: pointer;
-            margin-top: -7px;
-        }
-        input[type=range]::-webkit-slider-runnable-track {
-            width: 100%;
-            height: 4px;
-            cursor: pointer;
-            background: #334155;
-            border-radius: 2px;
-        }
-    </style>
+  <meta charset="utf-8">
+  <title>DCAI L3 · Foundation Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: {
+      colors: {
+        ink: { 950:'#07080a', 900:'#0c0e11', 850:'#101318', 800:'#12151a', 750:'#171b21', 700:'#1e232b' },
+        gold: { DEFAULT:'#f0b90b', 2:'#ffd34d' },
+        aqua: { DEFAULT:'#22d3ee', 2:'#67e8f9' },
+      },
+      fontFamily: { sans:['Inter','system-ui','sans-serif'], mono:['"JetBrains Mono"','ui-monospace','monospace'] },
+    } } };
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+    body { font-family:'Inter',sans-serif; background:#07080a; }
+    .mono { font-family:'JetBrains Mono',monospace; }
+    .tnum { font-variant-numeric: tabular-nums; }
+    .keyline { height:1px; background:linear-gradient(90deg, rgba(240,185,11,0) 0%, rgba(240,185,11,.5) 30%, rgba(34,211,238,.5) 60%, rgba(240,185,11,0) 100%); }
+    input[type=range]{ -webkit-appearance:none; background:transparent; }
+    input[type=range]::-webkit-slider-runnable-track{ height:4px; border-radius:2px; background:#1e232b; }
+    input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; height:16px; width:16px; border-radius:50%; background:#f0b90b; cursor:pointer; margin-top:-6px; }
+    ::-webkit-scrollbar{ width:8px; height:8px; } ::-webkit-scrollbar-track{ background:#07080a; } ::-webkit-scrollbar-thumb{ background:#232833; border-radius:4px; }
+    .card{ background:#12151a; border:1px solid #232833; border-radius:14px; }
+    .subtle{ color:#6e7683; }
+  </style>
 </head>
-<body class="bg-slate-950 text-slate-100 p-4 md:p-8">
-    <div class="max-w-7xl mx-auto">
-        <header class="mb-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-                <h1 class="text-4xl font-extrabold tracking-tight text-white">
-                    DCAI <span class="text-yellow-500">Foundation</span>
-                </h1>
-                <p class="text-slate-400 font-medium mt-1 uppercase text-xs tracking-widest">Unified Network Control Center</p>
-            </div>
-            <div class="flex items-center gap-6 bg-slate-900/50 p-4 rounded-3xl border border-slate-800 shadow-2xl">
-                <div class="text-right">
-                    <div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Latest Block</div>
-                    <div class="text-xl font-mono text-emerald-400 font-bold tracking-tighter">#${blockNumber}</div>
-                </div>
-                <div class="w-px h-10 bg-slate-800"></div>
-                <div class="text-right">
-                    <div class="flex items-center justify-end gap-2">
-                        <span class="relative flex h-2 w-2">
-                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                          <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                        </span>
-                        <span class="text-green-400 text-xs font-bold uppercase tracking-wider">Network Active</span>
-                    </div>
-                    <p class="text-[10px] text-slate-500 mt-0.5">Update: ${new Date().toLocaleTimeString()}</p>
-                </div>
-            </div>
-        </header>
+<body class="text-[#e8eaee]">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
-            <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl md:col-span-2">
-                <h3 class="text-slate-500 text-xs font-bold uppercase tracking-widest mb-4">Treasury Reserve</h3>
-                <div class="text-3xl font-mono text-blue-400 font-bold">${formatBalance(treasuryBal)} <span class="text-lg font-sans text-slate-600 ml-1">tDCAI</span></div>
-                <div class="mt-4 pt-4 border-t border-slate-800/50">
-                    <span class="text-[9px] text-slate-600 font-mono tracking-tight cursor-pointer hover:text-blue-400" onclick="copyText('${TREASURY_ADDR}')">${TREASURY_ADDR.slice(0,18)}...</span>
-                </div>
-            </div>
-            <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
-                <h3 class="text-slate-500 text-xs font-bold uppercase tracking-widest mb-4">Distributor Pool</h3>
-                <div class="text-3xl font-mono text-yellow-500 font-bold">${formatBalance(distributorBal)} <span class="text-lg font-sans text-slate-600 ml-1">tDCAI</span></div>
-                <div class="mt-4 flex flex-wrap gap-2">
-                    <button onclick="topup(100)" class="bg-slate-800 hover:bg-slate-700 text-[10px] font-bold px-2 py-1 rounded-lg border border-slate-700 transition">+100</button>
-                    <button onclick="topup(500)" class="bg-slate-800 hover:bg-slate-700 text-[10px] font-bold px-2 py-1 rounded-lg border border-slate-700 transition">+500</button>
-                    <button onclick="customTopup()" class="bg-yellow-500/10 text-yellow-500 text-[10px] font-bold px-2 py-1 rounded-lg border border-yellow-500/20 transition">CUSTOM</button>
-                </div>
-            </div>
-            <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
-                <h3 class="text-slate-500 text-xs font-bold uppercase tracking-widest mb-4">Current Epoch</h3>
-                <div class="text-3xl font-mono text-purple-400 font-bold">${measurements.epochId}</div>
-                <div class="mt-4 pt-4 border-t border-slate-800/50">
-                    <span class="text-[10px] text-slate-600 font-bold uppercase">Day: ${measurements.dayId || 'N/A'}</span>
-                </div>
-            </div>
-
-            <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl md:col-span-2 cursor-pointer hover:border-yellow-500/40 transition" onclick="openLatestRewards()">
-                <h3 class="text-slate-500 text-xs font-bold uppercase tracking-widest mb-4">Latest Published Reward</h3>
-                <div class="text-3xl font-mono text-yellow-400 font-bold">${format2(latestTotalWei)} <span class="text-lg font-sans text-slate-600 ml-1">tDCAI</span></div>
-                <div class="mt-4 pt-4 border-t border-slate-800/50 flex items-center justify-between">
-                    <div>
-                      <div class="text-[9px] text-slate-600 font-bold uppercase">Epoch</div>
-                      <div class="text-xs font-mono text-slate-300">${latestEpochId}</div>
-                      <div class="text-[9px] text-slate-600 font-bold uppercase mt-2">Day</div>
-                      <div class="text-xs font-mono text-slate-300">${latestDayId}</div>
-                      <div class="text-[9px] text-slate-600 font-bold uppercase mt-3">Recent (max 10)</div>
-                      <div class="text-[10px] font-mono text-slate-400">${recentRewardEpochIds.join(' · ') || 'N/A'}</div>
-                    </div>
-                    <div class="text-[10px] text-yellow-400 font-bold uppercase tracking-wider">View →</div>
-                </div>
-            </div>
-            <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
-                <div class="flex justify-between items-start">
-                    <h3 class="text-slate-500 text-xs font-bold uppercase tracking-widest mb-4">Daily Cap (Day ${dayId})</h3>
-                </div>
-                <div class="grid grid-cols-3 gap-3">
-                    <div>
-                        <div class="text-[9px] text-slate-600 font-bold uppercase">Cap</div>
-                        <div class="text-sm font-mono text-white font-bold">${format2(dailyCapWei)} <span class="text-[10px] text-slate-600 ml-1">tDCAI</span></div>
-                    </div>
-                    <div>
-                        <div class="text-[9px] text-slate-600 font-bold uppercase">Spent</div>
-                        <div class="text-sm font-mono text-amber-400 font-bold">${format2(dailySpentWei)} <span class="text-[10px] text-slate-600 ml-1">tDCAI</span></div>
-                    </div>
-                    <div>
-                        <div class="text-[9px] text-slate-600 font-bold uppercase">Remaining</div>
-                        <div class="text-sm font-mono text-emerald-400 font-bold">${format2(dailyRemainWei)} <span class="text-[10px] text-slate-600 ml-1">tDCAI</span></div>
-                    </div>
-                </div>
-                <div class="mt-4 pt-4 border-t border-slate-800/50 flex gap-2">
-                    <button onclick="increaseCap()" class="flex-1 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-2 py-1 rounded-lg border border-emerald-500/20 hover:bg-emerald-500/20 transition">INCREASE +100</button>
-                    <button onclick="setCap()" class="flex-1 bg-yellow-500/10 text-yellow-500 text-[10px] font-bold px-2 py-1 rounded-lg border border-yellow-500/20 hover:bg-yellow-500/20 transition">SET CAP</button>
-                </div>
-            </div>
+    <!-- Header -->
+    <header class="flex flex-wrap items-center justify-between gap-3 pb-4">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gold flex items-center justify-center font-extrabold text-ink-950">D</div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight">DCAI <span class="text-gold">L3</span> · Foundation Control</h1>
+          <div class="text-[11px] mono subtle">Admin console · chainId 18441 · block #${blockNumber.toLocaleString()}</div>
         </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="/" target="_blank" class="text-[11px] mono px-3 py-1.5 rounded-lg border border-[#232833] text-[#a2a9b4] hover:text-white hover:border-[#303747]">Explorer ↗</a>
+        <button onclick="location.reload()" class="text-[11px] mono px-3 py-1.5 rounded-lg border border-[#232833] text-[#a2a9b4] hover:text-white hover:border-[#303747]">Refresh</button>
+      </div>
+    </header>
+    <div class="keyline mb-6"></div>
 
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-10 mb-10">
-            <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl mb-10">
-                <div class="flex justify-between items-center">
-                    <h2 class="text-xl font-bold text-white">Health Check (1-min)</h2>
-                    <div id="healthUpdatedAt" class="text-[10px] text-slate-500 font-mono"></div>
-                </div>
-                <div id="healthTable" class="mt-4 text-xs text-slate-300"></div>
-            </div>
-            <!-- Infra Monitoring -->
-            <div class="bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
-                <div class="p-6 border-b border-slate-800 bg-slate-900/50">
-                    <h2 class="text-xl font-bold text-white">DCAI Core Infrastructure</h2>
-                </div>
-                <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    ${INFRA.map(node => `
-                    <div class="p-4 bg-slate-800/30 rounded-2xl border border-slate-800 hover:border-slate-700 transition group">
-                        <div class="flex justify-between items-start">
-                            <div class="text-xs font-bold text-slate-300">${node.name}</div>
-                            <span class="px-2 py-0.5 rounded-full bg-slate-700 text-[8px] font-bold text-slate-400 uppercase tracking-widest">${node.type}</span>
-                        </div>
-                        <div class="mt-2 font-mono text-sm text-yellow-500 cursor-pointer" onclick="copyText('${node.ip}')">${node.ip}</div>
-                        <div class="mt-2 flex items-center justify-between">
-                            <div class="text-[9px] text-slate-500 uppercase font-bold">${node.role}</div>
-                            <div class="flex items-center gap-1">
-                                <div id="dot_${node.ip.replaceAll('.','_')}" class="w-1.5 h-1.5 rounded-full bg-slate-600"></div>
-                                <span id="st_${node.ip.replaceAll('.','_')}" class="text-[9px] text-slate-400 font-bold">CHECKING</span>
-                            </div>
-                        </div>
-                        <div class="mt-2 text-[9px] text-slate-600 font-mono">Last: <span id="ts_${node.ip.replaceAll('.','_')}">--</span> • <span id="ms_${node.ip.replaceAll('.','_')}">--</span></div>
-                    </div>
-                    `).join('')}
-                </div>
-                <div class="mt-auto p-4 bg-slate-900/50 border-t border-slate-800">
-                    <div class="flex justify-between text-[10px] text-slate-500 font-bold uppercase">
-                        <span>Network Health Index</span>
-                        <span class="text-emerald-400">100% (Optimal)</span>
-                    </div>
-                    <div class="mt-2 w-full bg-slate-800 h-1 rounded-full"><div class="bg-emerald-500 h-full w-full"></div></div>
-                </div>
-            </div>
-
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-10 mb-10">
-            <!-- Contributor Performance -->
-            <div class="bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden">
-                <div class="p-6 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
-                    <h2 class="text-xl font-bold text-white">External Contributors</h2>
-                    <span class="px-3 py-1 bg-yellow-500/10 text-yellow-500 text-[10px] font-bold rounded-full">REWARDS ACTIVE</span>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left">
-                        <thead>
-                            <tr class="text-slate-500 text-[9px] font-bold uppercase tracking-widest bg-slate-900/50">
-                                <th class="px-6 py-4">Operator</th>
-                                <th class="px-6 py-4">RPC Stats</th>
-                                <th class="px-6 py-4 text-right">Indexer (shared infra)</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-800/50">
-                            ${measurements.operators.map((op, idx) => {
-                                const conf = config.operators.find(c => c.operator.toLowerCase() === op.operator.toLowerCase());
-                                const rpcIp = conf?.endpoints?.rpc?.match(/\\d+\\.\\d+\\.\\d+\\.\\d+/) || 'N/A';
-                                const rpcUptime = op.metrics?.rpc?.uptime ?? 0;
-                                const rpcP95 = op.metrics?.rpc?.p95_ms;
-                                const indexerEnabled = !!conf?.services?.indexer;
-                                const indexerLag = op.metrics?.indexer?.lag_blocks;
-                                return `
-                            <tr class="hover:bg-slate-800/20 transition-colors">
-                                <td class="px-6 py-5">
-                                    <div class="text-xs font-bold text-white mb-0.5">${op.operator === '0x6B876620391BD2A1281247B1fC15ae4994D50663' ? 'Contributor 1' : 'Contributor 2'}</div>
-                                    <div class="text-[9px] text-slate-500 font-mono">IP: ${rpcIp}</div>
-                                    <div class="text-[8px] text-slate-600 font-mono mt-0.5 cursor-pointer hover:text-yellow-500" onclick="copyText('${op.operator}')">${op.operator.slice(0,20)}...</div>
-                                </td>
-                                <td class="px-6 py-5">
-                                    <div class="${rpcUptime > 0.9 ? 'text-emerald-400' : 'text-rose-500'} text-xs font-bold">${(rpcUptime * 100).toFixed(1)}%</div>
-                                    <div class="text-[9px] text-slate-500 font-mono">${rpcP95 == null ? '--' : rpcP95.toFixed(0) + 'ms'}</div>
-                                </td>
-                                <td class="px-6 py-5 text-right">
-                                    ${indexerEnabled && indexerLag != null
-                                      ? `<div class="text-xs font-bold ${indexerLag < 5 ? 'text-emerald-400' : 'text-amber-500'}">-${indexerLag}</div><div class="text-[9px] text-slate-600 uppercase font-bold">Blocks</div>`
-                                      : `<div class="text-xs font-bold text-slate-500">OFF</div><div class="text-[9px] text-slate-600 uppercase font-bold">Disabled</div>`}
-                                </td>
-                            </tr>
-                            `;}).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            <!-- Strategy Panel -->
-            <div class="bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-xl mb-10">
-                <div class="flex justify-between items-center mb-8">
-                    <div>
-                        <h2 class="text-xl font-bold text-white">Network Reward Strategy</h2>
-                        <p class="text-slate-500 text-xs mt-1">Dynamically adjust incentives for different node roles</p>
-                    </div>
-                    <button onclick="saveWeights()" id="saveBtn" class="bg-yellow-500 text-black px-6 py-2.5 rounded-2xl text-xs font-bold hover:bg-yellow-400 transition shadow-lg shadow-yellow-500/20">UPDATE GLOBAL WEIGHTS</button>
-                </div>
-                
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-10">
-                    <div class="p-6 bg-slate-800/30 rounded-2xl border border-slate-800">
-                        <div class="flex justify-between items-center mb-4">
-                            <label class="text-xs font-bold text-slate-400 uppercase tracking-widest">RPC Gateway</label>
-                            <span id="rpcWeightLabel" class="text-sm font-mono text-yellow-500 font-bold">${(weights.rpc * 100).toFixed(0)}%</span>
-                        </div>
-                        <input type="range" id="rpcWeight" min="0" max="100" value="${weights.rpc * 100}" oninput="updateLabels()" class="w-full">
-                    </div>
-    
-                    <div class="p-6 bg-slate-800/30 rounded-2xl border border-slate-800">
-                        <div class="flex justify-between items-center mb-4">
-                            <label class="text-xs font-bold text-slate-400 uppercase tracking-widest">Storage Node</label>
-                            <span id="storageWeightLabel" class="text-sm font-mono text-emerald-400 font-bold">${(weights.storage * 100).toFixed(0)}%</span>
-                        </div>
-                        <input type="range" id="storageWeight" min="0" max="100" value="${weights.storage * 100}" oninput="updateLabels()" class="w-full">
-                    </div>
-    
-                    <div class="p-6 bg-slate-800/30 rounded-2xl border border-slate-800">
-                        <div class="flex justify-between items-center mb-4">
-                            <label class="text-xs font-bold text-slate-400 uppercase tracking-widest">Indexer Sync</label>
-                            <span id="indexerWeightLabel" class="text-sm font-mono text-blue-400 font-bold">${(weights.indexer * 100).toFixed(0)}%</span>
-                        </div>
-                        <input type="range" id="indexerWeight" min="0" max="100" value="${weights.indexer * 100}" oninput="updateLabels()" class="w-full">
-                    </div>
-                </div>
-                
-                <div id="weightAlert" class="mt-6 hidden p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-[10px] font-bold text-center uppercase tracking-wider">
-                    Total allocation must equal 100% (Current: <span id="totalWeight">100</span>%)
-                </div>
-            </div>
-    
-        </div>
-
-
-
-        <div class="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl mb-10">
-            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div>
-                    <h2 class="text-xl font-bold text-white">API Key Approvals</h2>
-                    <p class="text-slate-500 text-xs mt-1">Stake-gated requests for app plans + ecosystem contributors (approve / reject / revoke)</p>
-                </div>
-                <div class="flex flex-wrap gap-2 items-center">
-                    <div class="px-3 py-2 rounded-2xl border border-slate-700 bg-slate-950 text-[10px] font-mono text-slate-400">Signed in via Basic Auth</div>
-                    <button onclick="refreshAdminData()" class="bg-yellow-500 text-black text-[10px] font-bold px-3 py-2 rounded-2xl hover:bg-yellow-400 transition">REFRESH</button>
-                </div>
-            </div>
-
-            <div id="apiKeyReqStatus" class="mt-3 text-[10px] font-mono text-slate-500"></div>
-            <div class="mt-3 flex flex-wrap gap-2 items-center">
-                <input id="requestSearchInput" placeholder="Search wallet / endpoint / note" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono w-[320px]" />
-                <select id="requestFilterSelect" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono text-slate-300">
-                    <option value="all">All pending</option>
-                    <option value="contributor">Contributor only</option>
-                    <option value="app">App/API only</option>
-                </select>
-            </div>
-            <div id="apiKeyRequestsTable" class="mt-4"></div>
-
-            <div class="mt-6 pt-4 border-t border-slate-800/50">
-                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                    <div>
-                        <div class="text-xs font-bold text-slate-300">Request History</div>
-                        <div class="text-[10px] font-mono text-slate-500 mt-1">Recent approved / rejected / pending requests</div>
-                    </div>
-                </div>
-                <div id="apiKeyRequestHistoryTable" class="mt-3"></div>
-            </div>
-
-            <div class="mt-6 pt-4 border-t border-slate-800/50">
-                <div class="text-xs font-bold text-slate-300">Key Controls</div>
-                <div class="mt-2 flex flex-wrap gap-2 items-center">
-                    <input id="revokeKeyInput" placeholder="32-hex key" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono w-[240px]" />
-                    <input id="keySearchInput" placeholder="Search key prefix / wallet" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono w-[240px]" />
-                    <button onclick="revokeKey()" class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-2 rounded-2xl border border-rose-500/20 hover:bg-rose-500/20 transition">REVOKE</button>
-                    <button onclick="loadApiKeyKeys()" class="bg-slate-800 hover:bg-slate-700 text-[10px] font-bold px-3 py-2 rounded-2xl border border-slate-700 transition">LIST KEYS</button>
-                </div>
-                <div id="apiKeyKeysTable" class="mt-3"></div>
-            </div>
-
-            <div class="mt-6 pt-4 border-t border-slate-800/50">
-                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                    <div>
-                        <div class="text-xs font-bold text-slate-300">Stake / Unstake Watch</div>
-                        <div class="text-[10px] font-mono text-slate-500 mt-1">Tracked addresses from API-key requests + issued keys. Shows unstake cooldown / withdrawable state.</div>
-                    </div>
-                    <div class="flex gap-2 items-center">
-                        <button onclick="loadStakeWatch()" class="bg-slate-800 hover:bg-slate-700 text-[10px] font-bold px-3 py-2 rounded-2xl border border-slate-700 transition">LOAD STAKES</button>
-                    </div>
-                </div>
-                <div id="stakeWatchStatus" class="mt-3 text-[10px] font-mono text-slate-500"></div>
-                <div id="stakeWatchTable" class="mt-3"></div>
-            </div>
-
-            <div class="mt-6 pt-4 border-t border-slate-800/50">
-                <div>
-                    <div class="text-xs font-bold text-slate-300">Admin Login Password</div>
-                    <div class="text-[10px] font-mono text-slate-500 mt-1">Updates the Basic Auth password used for /admin/ and /admin/api/.</div>
-                </div>
-                <div class="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
-                    <input id="adminBasicUserInput" value="dcaiadmin" placeholder="Username" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono" />
-                    <input id="adminBasicCurrentInput" type="password" placeholder="Current password" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono" />
-                    <input id="adminBasicNewInput" type="password" placeholder="New password" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono" />
-                    <input id="adminBasicConfirmInput" type="password" placeholder="Confirm new password" class="bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-xs font-mono" />
-                </div>
-                <div class="mt-3 flex flex-wrap gap-2 items-center">
-                    <button onclick="changeAdminPassword()" class="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-3 py-2 rounded-2xl border border-emerald-500/20 hover:bg-emerald-500/20 transition">UPDATE LOGIN PASSWORD</button>
-                </div>
-                <div id="adminBasicStatus" class="mt-3 text-[10px] font-mono text-slate-500"></div>
-            </div>
-        </div>
-        <footer class="mt-12 mb-8 text-center">
-            <p class="text-slate-600 text-[10px] font-bold uppercase tracking-[0.3em]">DCAI Foundation Unified Dashboard &bull; Admin v1.4</p>
-        </footer>
-    </div>
-
-    <script>
-        const API_URL = '/admin/api';
-
-      setTimeout(function(){ try { initAdminTokenInput(); } catch(e){} }, 0);
-
-        async function setCap() {
-            const cap = prompt("Set new DAILY CAP (tDCAI). Example: 500");
-            if (!cap || isNaN(cap) || parseFloat(cap) <= 0) return;
-            if (!confirm("Confirm on-chain tx: setDailyCap(" + cap + " tDCAI)?")) return;
-            const r = await fetch(API_URL + "/set-cap", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ cap: parseFloat(cap) })
-            });
-            const d = await r.json();
-            if (d.success) {
-                alert("CAP tx sent: " + d.hash);
-                location.reload();
-            } else {
-                alert("Set cap failed: " + (d.error || "unknown"));
-            }
-        }
-
-        async function increaseCap() {
-            const r = await fetch(API_URL + "/cap");
-            const d = await r.json();
-            const newCap = parseFloat(d.cap) + 100;
-            if (!confirm("Increase daily cap to " + newCap + " tDCAI?")) return;
-            const r2 = await fetch(API_URL + "/set-cap", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ cap: newCap })
-            });
-            const d2 = await r2.json();
-            if (d2.success) {
-                alert("CAP tx sent: " + d2.hash);
-                location.reload();
-            } else {
-                alert("Increase cap failed: " + (d2.error || "unknown"));
-            }
-        }
-
-
-        async function loadHealth() {
-            try {
-                const r = await fetch("/admin/health.json", { cache: "no-store" });
-                const d = await r.json();
-                const ts = d.generatedAt ? new Date(d.generatedAt).toLocaleString() : "";
-                const ua = document.getElementById("healthUpdatedAt");
-                if (ua) ua.innerText = ts ? ("Updated: " + ts) : "";
-
-                const rows = [];
-                const add = (name, obj) => {
-                    if (!obj) return;
-                    const ok = obj.ok === true;
-                    rows.push({
-                        name,
-                        status: ok ? "OK" : "DOWN",
-                        ms: obj.ms != null ? Math.round(obj.ms) : null,
-                        info: ok ? (obj.status != null ? ("HTTP " + obj.status) : "") : (obj.error || "")
-                    });
-                };
-
-                add("Infra: nginx /", d.nodes?.Infra?.nginx);
-                add("Infra: faucet :8080", d.nodes?.Infra?.faucet);
-                add("Infra: adminApi :3001", d.nodes?.Infra?.adminApi);
-                add("RPC1: eth_chainId", d.nodes?.RPC1?.rpc);
-                add("RPC2: eth_chainId", d.nodes?.RPC2?.rpc);
-                add("Signer1: ssh", d.nodes?.Signer1?.ssh);
-                add("Signer2: ssh", d.nodes?.Signer2?.ssh);
-                add("Signer3: ssh", d.nodes?.Signer3?.ssh);
-                add("Indexer: ssh", d.nodes?.Indexer?.ssh);
-
-                let html = "<div class=\\\"overflow-x-auto\\\"><table class=\\\"w-full text-left text-[11px]\\\">";
-                html += "<thead class=\\\"text-slate-500 uppercase tracking-widest text-[10px]\\\"><tr>";
-                html += "<th class=\\\"py-2 pr-4\\\">Target</th><th class=\\\"py-2 pr-4\\\">Status</th><th class=\\\"py-2 pr-4\\\">Latency</th><th class=\\\"py-2\\\">Info</th>";
-                html += "</tr></thead><tbody class=\\\"divide-y divide-slate-800/50\\\">";
-
-                for (const row of rows) {
-                    const cls = row.status === "OK" ? "text-emerald-400" : "text-rose-500";
-                    const ms = row.ms == null ? "" : (row.ms + "ms");
-                    html += "<tr>";
-                    html += "<td class=\\\"py-2 pr-4 font-mono text-slate-300\\\">" + row.name + "</td>";
-                    html += "<td class=\\\"py-2 pr-4 " + cls + " font-bold\\\">" + row.status + "</td>";
-                    html += "<td class=\\\"py-2 pr-4 text-slate-400 font-mono\\\">" + ms + "</td>";
-                    html += "<td class=\\\"py-2 text-slate-500 font-mono truncate\\\">" + (row.info || "") + "</td>";
-                    html += "</tr>";
-                }
-
-                html += "</tbody></table></div>";
-
-                const el = document.getElementById("healthTable");
-                if (el) el.innerHTML = html;
-
-                // Update the status dots in "DCAI Core Infrastructure" cards (they default to CHECKING).
-                try {
-                    const byIp = {
-                        "45.76.190.151": d.nodes?.Signer1?.ssh,
-                        "139.180.188.167": d.nodes?.Signer2?.ssh,
-                        "45.76.145.198": d.nodes?.Signer3?.ssh,
-                        "139.180.188.61": d.nodes?.RPC1?.rpc,
-                        "207.148.72.238": d.nodes?.RPC2?.rpc,
-                        "139.180.141.226": d.nodes?.Indexer?.ssh,
-                        "139.180.140.143": d.nodes?.Infra?.nginx
-                    };
-
-                    for (const [ip, obj] of Object.entries(byIp)) {
-                        const id = ip.replaceAll(".", "_");
-                        const ok = obj?.ok === true;
-                        const ms = obj?.ms != null ? Math.round(obj.ms) : null;
-                        const ts = d.generatedAt ? new Date(d.generatedAt).toLocaleTimeString() : "";
-
-                        const dot = document.getElementById("dot_" + id);
-                        const st = document.getElementById("st_" + id);
-                        const tsEl = document.getElementById("ts_" + id);
-                        const msEl = document.getElementById("ms_" + id);
-
-                        if (dot) {
-                            dot.classList.remove("bg-slate-600", "bg-emerald-500", "bg-rose-500");
-                            dot.classList.add(ok ? "bg-emerald-500" : "bg-rose-500");
-                        }
-                        if (st) {
-                            st.innerText = ok ? "OK" : "DOWN";
-                            st.classList.remove("text-slate-400", "text-emerald-400", "text-rose-500");
-                            st.classList.add(ok ? "text-emerald-400" : "text-rose-500");
-                        }
-                        if (tsEl) tsEl.innerText = ts || "--";
-                        if (msEl) msEl.innerText = (ms == null ? "--" : (ms + "ms"));
-                    }
-                } catch (e) {}
-            } catch (e) {
-                const el = document.getElementById("healthTable");
-                if (el) el.innerText = "Health load failed: " + (e?.message || e);
-            }
-        }
-        function copyText(text) {
-            const showToast = () => {
-                const toast = document.createElement('div');
-                toast.className = 'fixed bottom-8 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-6 py-3 rounded-2xl text-[10px] font-bold shadow-2xl z-50 animate-bounce';
-                toast.innerText = 'COPIED: ' + text;
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 2500);
-            };
-
-            // navigator.clipboard is unavailable on some browsers / non-https contexts
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(showToast).catch(() => fallbackCopy(text));
-            } else {
-                fallbackCopy(text);
-            }
-
-            function fallbackCopy(t) {
-                try {
-                    const ta = document.createElement('textarea');
-                    ta.value = t;
-                    ta.style.position = 'fixed';
-                    ta.style.left = '-9999px';
-                    ta.style.top = '-9999px';
-                    document.body.appendChild(ta);
-                    ta.focus();
-                    ta.select();
-                    document.execCommand('copy');
-                    ta.remove();
-                    showToast();
-                } catch (e) {
-                    alert('Copy failed: ' + (e?.message || e));
-                }
-            }
-        }
-
-        function updateLabels() {
-            const rpc = parseInt(document.getElementById('rpcWeight').value);
-            const storage = parseInt(document.getElementById('storageWeight').value);
-            const indexer = parseInt(document.getElementById('indexerWeight').value);
-            document.getElementById('rpcWeightLabel').innerText = rpc + '%';
-            document.getElementById('storageWeightLabel').innerText = storage + '%';
-            document.getElementById('indexerWeightLabel').innerText = indexer + '%';
-            const total = rpc + storage + indexer;
-            document.getElementById('totalWeight').innerText = total;
-            const btn = document.getElementById('saveBtn');
-            if (total !== 100) {
-                document.getElementById('weightAlert').classList.remove('hidden');
-                btn.disabled = true; btn.classList.add('opacity-30');
-            } else {
-                document.getElementById('weightAlert').classList.add('hidden');
-                btn.disabled = false; btn.classList.remove('opacity-30');
-            }
-        }
-
-        async function saveWeights() {
-            const btn = document.getElementById('saveBtn');
-            const originalText = btn.innerText;
-            btn.innerText = 'COMMITING...'; btn.disabled = true;
-            try {
-                const response = await fetch(API_URL + '/update-weights', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        rpc: parseInt(document.getElementById('rpcWeight').value) / 100,
-                        storage: parseInt(document.getElementById('storageWeight').value) / 100,
-                        indexer: parseInt(document.getElementById('indexerWeight').value) / 100
-                    })
-                });
-                if (response.ok) {
-                    btn.innerText = 'SUCCESS'; btn.classList.replace('bg-yellow-500', 'bg-emerald-500');
-                    setTimeout(() => location.reload(), 1500);
-                }
-            } catch (e) { alert(e.message); btn.innerText = originalText; btn.disabled = false; }
-        }
-
-        async function topup(amount) {
-            if (!confirm('Authorize transfer of ' + amount + ' tDCAI?')) return;
-            try {
-                const response = await fetch(API_URL + '/topup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ amount: amount })
-                });
-                const data = await response.json();
-                if (data.success) { alert('Top-up Success! Tx: ' + data.hash); location.reload(); }
-            } catch (e) { alert(e.message); }
-        }
-
-        function customTopup() {
-            const amount = prompt('Amount (tDCAI):');
-            if (amount && !isNaN(amount)) topup(parseFloat(amount));
-        }
-        // init
-        try { loadHealth(); } catch (e) {}
-        try { updateLabels(); } catch (e) {}
-        try { refreshAdminData(); loadApiKeyKeys(); } catch (e) {}
-
-    </script>
-
-    <!-- Latest Rewards Modal -->
-    <div id="latestRewardsModal" class="fixed inset-0 hidden items-center justify-center bg-black/60 p-4" style="z-index: 9999;">
-      <div class="w-full max-w-5xl bg-slate-950 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-        <div class="p-5 border-b border-slate-800 flex items-center justify-between gap-4">
-          <div>
-            <div class="text-xs text-slate-500 font-bold uppercase tracking-widest">Latest Published Reward</div>
-            <div id="latestRewardsTitle" class="text-lg font-mono text-yellow-400 font-bold">--</div>
-            <div id="latestRewardsMeta" class="mt-1 text-[10px] text-slate-500 font-mono">--</div>
-            <select id="latestRewardsEpochSelect" class="mt-3 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200"></select>
-          </div>
-          <button onclick="closeLatestRewards()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold">Close</button>
-        </div>
-        <div class="p-5 overflow-y-auto">
-          <div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3">Distribution + Score Breakdown</div>
-          <div id="latestRewardsList" class="space-y-4"></div>
-          <div class="text-[10px] text-slate-600 mt-4">Tip: click address to copy</div>
-        </div>
+    <!-- Intro / legend -->
+    <div class="card p-4 mb-6">
+      <div class="text-[11px] leading-relaxed text-[#a2a9b4]">
+        This console runs the <b class="text-white">rewards pipeline</b> and the <b class="text-white">RPC API-key system</b> for the DCAI L3 testnet.
+        Sections are ordered by how the reward flow works: money in (treasury → distributor), the per-day budget (daily cap),
+        how each 2-hour epoch is scored (reward strategy), who earns (operators), and who may call the RPC (API keys).
+        <span class="block mt-1 subtle">本控制台管理 DCAI L3 测试网的<b class="text-[#a2a9b4]">奖励流程</b>与 <b class="text-[#a2a9b4]">RPC API Key 体系</b>。下面各板块按奖励资金流向排列，每块都有中文说明。</span>
       </div>
     </div>
 
-    <script>
-      window.__LATEST_REWARDS__ = ${JSON.stringify(latestRewards || {})};
-      window.__RECENT_REWARD_EPOCHS__ = ${JSON.stringify(recentRewardEpochIds || [])};
+    <!-- Overview stats -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      <div class="card p-4">
+        <div class="text-[10px] uppercase tracking-widest subtle">Treasury Reserve</div>
+        <div class="mt-1 text-xl font-bold mono tnum text-gold">${fmt4(treasuryBal)}</div>
+        <div class="text-[10px] mono subtle mt-0.5">tDCAI · fee sink</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-[10px] uppercase tracking-widest subtle">Distributor Pool</div>
+        <div class="mt-1 text-xl font-bold mono tnum text-aqua">${fmt4(distributorBal)}</div>
+        <div class="text-[10px] mono subtle mt-0.5">tDCAI · pays claims</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-[10px] uppercase tracking-widest subtle">Epochs Today</div>
+        <div class="mt-1 text-xl font-bold mono tnum">${epochsToday}<span class="text-[11px] subtle"> / 12</span></div>
+        <div class="text-[10px] mono subtle mt-0.5">published on-chain</div>
+      </div>
+      <button onclick="openLatestRewards()" class="card p-4 text-left hover:border-[#303747] transition">
+        <div class="text-[10px] uppercase tracking-widest subtle">Latest Reward ↗</div>
+        <div class="mt-1 text-xl font-bold mono tnum">${fmt4(latestTotalWei)}</div>
+        <div class="text-[10px] mono subtle mt-0.5">epoch ${esc(latestEpochId)} · click for breakdown</div>
+      </button>
+    </div>
 
-      function weiTo18(weiStr) {
-        try {
-          var s = (BigInt(weiStr || '0')).toString();
-          if (s.length <= 18) s = '0'.repeat(18 - s.length + 1) + s;
-          var head = s.slice(0, -18);
-          var tail = s.slice(-18);
-          var tail6 = tail.slice(0, 6);
-          return head + '.' + tail6;
-        } catch (e) {
-          return '--';
-        }
-      }
+    <!-- Rewards Pipeline: Daily cap -->
+    <section class="card p-5 mb-6">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 class="text-sm font-bold">Rewards Pipeline · Daily Cap <span class="mono subtle text-[11px]">(Day ${dayId})</span></h2>
+          <p class="text-[11px] text-[#a2a9b4] mt-1 max-w-2xl">Every 2 hours a cron scores operators and publishes one <b>epoch</b> (pool = daily cap ÷ 12). The on-chain distributor refuses to pay more than the <b>daily cap</b> per UTC day. "Day ${dayId}" is today's dayId; the bar shows how much of today's budget is already committed.
+          <span class="block subtle mt-1">每 2 小时结算一个 epoch（额度 = 每日上限 ÷ 12）。链上合约限制每天最多发放「每日上限」。进度条 = 今日已发放比例。</span></p>
+        </div>
+        <div class="flex gap-2 shrink-0">
+          <button onclick="setCap()" class="bg-gold text-ink-950 text-[11px] font-bold px-4 py-2 rounded-lg hover:bg-gold-2">Set cap</button>
+          <button onclick="increaseCap()" class="text-[11px] mono px-3 py-2 rounded-lg border border-[#232833] text-[#a2a9b4] hover:text-white">+100</button>
+        </div>
+      </div>
+      <div class="mt-4 grid grid-cols-3 gap-3 text-center">
+        <div class="rounded-lg bg-ink-900 border border-[#232833] py-2"><div class="text-[10px] subtle uppercase tracking-widest">Cap</div><div class="mono font-bold">${fmt2(dailyCapWei)}</div></div>
+        <div class="rounded-lg bg-ink-900 border border-[#232833] py-2"><div class="text-[10px] subtle uppercase tracking-widest">Spent</div><div class="mono font-bold text-gold">${fmt2(dailySpentWei)}</div></div>
+        <div class="rounded-lg bg-ink-900 border border-[#232833] py-2"><div class="text-[10px] subtle uppercase tracking-widest">Remaining</div><div class="mono font-bold text-aqua">${fmt2(dailyRemainWei)}</div></div>
+      </div>
+      <div class="mt-3 h-2 rounded-full bg-ink-900 overflow-hidden border border-[#232833]">
+        <div class="h-full bg-gradient-to-r from-gold to-gold-2" style="width:${spentPct.toFixed(1)}%"></div>
+      </div>
+      <div class="mt-1 text-[10px] mono subtle text-right">${spentPct.toFixed(1)}% of today's cap committed</div>
+    </section>
 
-      function formatPct(v, digits) {
-        if (v == null || Number.isNaN(Number(v))) return '--';
-        return (Number(v) * 100).toFixed(digits == null ? 2 : digits) + '%';
-      }
+    <!-- Reward Strategy: weights (NOW LIVE) -->
+    <section class="card p-5 mb-6">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 class="text-sm font-bold">Network Reward Strategy
+            <span class="ml-2 align-middle text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">LIVE · AFFECTS PAYOUTS</span>
+          </h2>
+          <p class="text-[11px] text-[#a2a9b4] mt-1 max-w-2xl">These weights decide how each operator's service scores combine into their epoch share. They are <b>relative</b> — only the ratio matters — and are now read live by the scorer. Changing them changes real payouts from the next epoch onward.
+          <span class="block subtle mt-1">这些权重决定各项服务得分如何合成运营者的 epoch 份额。数值是<b>相对</b>的（只看比例），现已被打分脚本实时读取——改动会从下一个 epoch 起真实影响发奖。</span></p>
+        </div>
+        <button onclick="saveWeights()" id="saveBtn" class="bg-gold text-ink-950 text-[11px] font-bold px-4 py-2 rounded-lg hover:bg-gold-2 shrink-0">Save weights</button>
+      </div>
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+        ${[['rpc', 'RPC', 'text-gold'], ['indexer', 'Indexer', 'text-aqua'], ['storage', 'Storage', 'text-emerald-400'], ['multiregion', 'Multi-region', 'text-violet-400']].map(([k, label, cls]) => `
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="subtle uppercase tracking-widest">${label}</span>
+            <span class="mono ${cls} font-bold"><span id="${k}WeightLabel">${W[k]}</span> <span class="subtle">· <span id="${k}WeightPct">${wPct(W[k])}</span>%</span></span>
+          </div>
+          <input type="range" id="${k}Weight" min="0" max="100" value="${W[k]}" oninput="updateLabels()" class="w-full">
+        </div>`).join('')}
+      </div>
+      <div class="mt-3 text-[10px] mono subtle">Raw total <span id="weightTotal">${wSum}</span> · percentages are the live split. No need to sum to 100 — ratios are what count.</div>
+    </section>
 
-      function formatScore(v, digits) {
-        if (v == null || Number.isNaN(Number(v))) return '--';
-        return Number(v).toFixed(digits == null ? 4 : digits);
-      }
+    <!-- Operators / Contributors -->
+    <section class="card p-5 mb-6">
+      <h2 class="text-sm font-bold">Operators &amp; External Contributors</h2>
+      <p class="text-[11px] text-[#a2a9b4] mt-1 max-w-3xl">Nodes enrolled in the reward program. "External" means machines outside the 7-server core fleet, probed through dedicated nginx routes. Each must also be <b>ACTIVE in OperatorRegistry</b> on-chain before <code class="text-aqua">claim()</code> works.
+      <span class="block subtle mt-1">参与奖励计划的节点。「外部」= 核心 7 台之外、别人运营、通过专用路由探测的机器。运营者还必须在链上 OperatorRegistry 里被激活，claim() 才有效。</span></p>
+      <div class="mt-4 overflow-x-auto">
+        <table class="w-full text-left text-[11px]">
+          <thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]">
+            <tr><th class="py-2 pr-4">Operator</th><th class="py-2 pr-4">Services</th><th class="py-2 pr-4">RPC endpoint</th><th class="py-2">Measured</th></tr>
+          </thead>
+          <tbody class="divide-y divide-[#1e232b]">
+            ${opRows.length ? opRows.map((o) => `
+            <tr>
+              <td class="py-2 pr-4 mono text-gold cursor-pointer" onclick="copyText('${esc(o.operator)}')">${esc(shortAddr(o.operator))}</td>
+              <td class="py-2 pr-4">${o.enabled.length ? o.enabled.map((s) => `<span class="inline-block mono text-[9px] px-1.5 py-0.5 rounded border border-[#303747] text-[#a2a9b4] mr-1">${esc(s)}</span>`).join('') : '<span class="subtle">none</span>'}</td>
+              <td class="py-2 pr-4 mono subtle truncate max-w-[280px]" title="${esc(o.endpoints.rpc || '')}">${esc(o.endpoints.rpc || '--')}</td>
+              <td class="py-2">${o.hasMeasurement ? '<span class="text-emerald-400">yes</span>' : '<span class="subtle">pending</span>'}</td>
+            </tr>`).join('') : '<tr><td colspan="4" class="py-3 subtle">No operators configured.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </section>
 
-      function formatMetricValue(key, value) {
-        if (value == null) return '--';
-        if (key === 'uptime' || key === 'error_rate') return formatPct(value, 2);
-        if (key === 'p95_ms' || key === 'io_p95_ms') return Number(value).toFixed(0) + 'ms';
-        if (key === 'lag_blocks') return Number(value).toFixed(0) + ' blk';
-        if (key === 'regions_ok' || key === 'regions_required') return String(value);
-        return formatScore(value, 4);
-      }
+    <!-- API Keys -->
+    <section class="card p-5 mb-6">
+      <h2 class="text-sm font-bold">API Key Approvals</h2>
+      <p class="text-[11px] text-[#a2a9b4] mt-1 max-w-3xl">One staking system, two front-ends: the developer <b>API Dashboard</b> and the <b>Contributor Program</b> (same basic/pro/ultra tiers, just relabelled). Each pending request is tagged by source. Approving generates a 32-hex key and reloads nginx so it works immediately.
+      <span class="block subtle mt-1">同一套质押体系，两个入口：开发者 <b>API Dashboard</b> 与 <b>Contributor Program</b>（tier 相同，只是换名）。每条申请已标注来源。批准会生成 key 并重载 nginx 立即生效。</span></p>
+      <div id="apiKeyReqStatus" class="mt-3 text-[10px] mono subtle"></div>
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <input id="requestSearchInput" placeholder="Search wallet / endpoint / note" class="bg-ink-900 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono w-[300px]">
+        <select id="requestFilterSelect" class="bg-ink-900 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono text-[#a2a9b4]">
+          <option value="all">All sources</option>
+          <option value="developer">Developer (API Dashboard)</option>
+          <option value="contributor">Contributor Program</option>
+        </select>
+      </div>
+      <div id="apiKeyRequestsTable" class="mt-4"></div>
 
-      function renderKeyValueBadges(obj, title) {
-        var entries = Object.entries(obj || {}).filter(function(pair) {
-          return pair[1] != null;
-        });
-        if (!entries.length) return '';
-        return '' +
-          '<div>' +
-            '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2">' + title + '</div>' +
-            '<div class="flex flex-wrap gap-2">' +
-              entries.map(function(pair) {
-                return '<span class="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[10px] font-mono text-slate-300">' + pair[0] + ': ' + formatMetricValue(pair[0], pair[1]) + '</span>';
-              }).join('') +
-            '</div>' +
-          '</div>';
-      }
+      <div class="mt-6 border-t border-[#1e232b] pt-4">
+        <h3 class="text-[11px] font-bold uppercase tracking-widest subtle">Request History</h3>
+        <div id="apiKeyRequestHistoryTable" class="mt-3"></div>
+      </div>
 
-      function renderServiceBreakdown(name, svc) {
-        if (!svc) return '';
-        var enabled = !!svc.enabled;
-        var stateClass = enabled ? 'text-emerald-400' : 'text-slate-500';
-        var stateText = enabled ? 'ENABLED' : 'DISABLED';
-        var note = '';
-        if (name === 'RPC Route') note = 'Live probe against operator-specific RPC route.';
-        if (name === 'Shared Infra Indexer') note = 'Single shared Blockscout probe on infra, not per-operator indexer attribution.';
-        if (name === 'Storage Health Endpoint') note = 'Simple HTTP health endpoint check only.';
-        if (name === 'Multi-route Check') note = 'Configured route-availability check, not direct proof of separate regional deployments.';
-        return '' +
-          '<div class="p-3 rounded-2xl bg-slate-900/70 border border-slate-800">' +
-            '<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">' +
-              '<div>' +
-                '<div class="text-xs font-bold text-white uppercase tracking-widest">' + name + '</div>' +
-                '<div class="text-[10px] font-mono ' + stateClass + '">' + stateText + ' · weight ' + (svc.weight == null ? '--' : svc.weight) + '</div>' +
-                (note ? ('<div class="text-[10px] text-slate-500 mt-1 max-w-xl">' + note + '</div>') : '') +
-              '</div>' +
-              '<div class="text-left md:text-right">' +
-                '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Raw / Weighted</div>' +
-                '<div class="text-xs font-mono text-slate-200">' + formatScore(svc.rawScore, 6) + ' / <span class="text-yellow-400">' + formatScore(svc.weightedScore, 6) + '</span></div>' +
-              '</div>' +
-            '</div>' +
-            '<div class="grid grid-cols-1 lg:grid-cols-2 gap-3">' +
-              renderKeyValueBadges(svc.metrics, 'Metrics') +
-              renderKeyValueBadges(svc.factors, 'Factors') +
-            '</div>' +
-          '</div>';
-      }
+      <div class="mt-6 border-t border-[#1e232b] pt-4">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <h3 class="text-[11px] font-bold uppercase tracking-widest subtle">Active Managed Keys</h3>
+          <input id="keySearchInput" placeholder="Search prefix / wallet / source" class="bg-ink-900 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono w-[260px]">
+        </div>
+        <div id="apiKeyKeysTable" class="mt-3"></div>
+      </div>
 
-      function renderClaimsInto(listEl, claims, epochData) {
-        if (!claims.length) {
-          listEl.innerHTML = '<div class="text-sm text-slate-400">No archived claims for this epoch yet.</div>';
-          return;
-        }
+      <div class="mt-6 border-t border-[#1e232b] pt-4">
+        <h3 class="text-[11px] font-bold uppercase tracking-widest subtle">Legacy Master Keys <span class="text-rose-400/80 normal-case tracking-normal">· unstaked, defined in nginx</span></h3>
+        <p class="text-[10px] subtle mt-1 max-w-2xl">These bypass the staking system entirely — they predate it and are hard-coded in the nginx map. Treat as break-glass credentials; migrate integrations off them when possible. Managed here as read-only.
+        <span class="block mt-0.5">这些绕过质押体系，硬编码在 nginx 里，属于「元老级」万能钥匙。视为应急凭证，尽量迁移掉。此处只读展示。</span></p>
+        <div id="legacyKeysTable" class="mt-3"></div>
+      </div>
+    </section>
 
-        listEl.innerHTML = claims.map(function(c) {
-          var op = c.operator || '--';
-          var amtWei = c.amountWei || '--';
-          var amtTDCAI = weiTo18(amtWei);
-          var sharePct = formatPct(c.sharePct, 4);
-          var totalScore = formatScore(c.totalScore, 6);
-          var breakdown = c.breakdown || {};
-          return '' +
-            '<div class="p-4 rounded-3xl bg-slate-900/60 border border-slate-800 hover:border-yellow-500/30 transition">' +
-              '<div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">' +
-                '<div class="min-w-0">' +
-                  '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Operator</div>' +
-                  '<div class="text-sm font-mono text-slate-200 break-all cursor-pointer" data-copy="' + op + '">' + op + '</div>' +
-                '</div>' +
-                '<div class="grid grid-cols-1 md:grid-cols-3 gap-3 lg:min-w-[420px]">' +
-                  '<div class="p-3 rounded-2xl bg-slate-950 border border-slate-800">' +
-                    '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Amount</div>' +
-                    '<div class="text-sm font-mono text-yellow-400 font-bold">' + amtTDCAI + ' tDCAI</div>' +
-                    '<div class="text-[10px] font-mono text-slate-500 break-all">wei: ' + amtWei + '</div>' +
-                  '</div>' +
-                  '<div class="p-3 rounded-2xl bg-slate-950 border border-slate-800">' +
-                    '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Total Score</div>' +
-                    '<div class="text-sm font-mono text-emerald-400 font-bold">' + totalScore + '</div>' +
-                    '<div class="text-[10px] text-slate-500">sum share basis</div>' +
-                  '</div>' +
-                  '<div class="p-3 rounded-2xl bg-slate-950 border border-slate-800">' +
-                    '<div class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Share</div>' +
-                    '<div class="text-sm font-mono text-blue-400 font-bold">' + sharePct + '</div>' +
-                    '<div class="text-[10px] text-slate-500">of epoch pool</div>' +
-                  '</div>' +
-                '</div>' +
-              '</div>' +
-              '<div class="grid grid-cols-1 xl:grid-cols-2 gap-3">' +
-                renderServiceBreakdown('RPC Route', breakdown.rpc) +
-                renderServiceBreakdown('Shared Infra Indexer', breakdown.indexer) +
-                renderServiceBreakdown('Storage Health Endpoint', breakdown.storage) +
-                renderServiceBreakdown('Multi-route Check', breakdown.multiregion) +
-              '</div>' +
-            '</div>';
-        }).join('');
+    <!-- Stake watch -->
+    <section class="card p-5 mb-6">
+      <h2 class="text-sm font-bold">Stake Watch</h2>
+      <p class="text-[11px] text-[#a2a9b4] mt-1 max-w-3xl">On-chain stake status for every wallet that has a key or request. Policy: a key is valid while staked; if a wallet requests unstake or becomes withdrawable, consider revoking its key.
+      <span class="block subtle mt-1">所有持有 key 或申请过的钱包的链上质押状态。策略：质押期间 key 有效；若发起解押/可提取，考虑撤销其 key。</span></p>
+      <div id="stakeWatchStatus" class="mt-3 text-[10px] mono subtle"></div>
+      <div id="stakeWatchTable" class="mt-3"></div>
+    </section>
 
-        try {
-          Array.from(listEl.querySelectorAll('[data-copy]')).forEach(function(el) {
-            el.addEventListener('click', function() {
-              copyText(el.getAttribute('data-copy'));
-            });
-          });
-        } catch (e) {}
-      }
+    <!-- Health + infra -->
+    <section class="card p-5 mb-6">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold">Health Check <span class="subtle text-[11px] mono">(1-min)</span></h2>
+        <div id="healthUpdatedAt" class="text-[10px] mono subtle"></div>
+      </div>
+      <div id="healthTable" class="mt-4 text-[11px]"></div>
+      <div class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+        ${INFRA.map((node) => `
+        <div class="rounded-lg bg-ink-900 border border-[#232833] p-3">
+          <div class="text-[11px] font-bold">${esc(node.name)}</div>
+          <div class="text-[9px] mono subtle">${esc(node.ip)} · ${esc(node.role)}</div>
+          <div class="mt-2 flex items-center gap-1.5">
+            <div id="dot_${node.ip.replaceAll('.', '_')}" class="w-1.5 h-1.5 rounded-full bg-[#3a4150]"></div>
+            <span id="st_${node.ip.replaceAll('.', '_')}" class="text-[9px] subtle font-bold">CHECKING</span>
+          </div>
+          <div class="mt-1 text-[9px] mono subtle">Last: <span id="ts_${node.ip.replaceAll('.', '_')}">--</span> · <span id="ms_${node.ip.replaceAll('.', '_')}">--</span></div>
+        </div>`).join('')}
+      </div>
+    </section>
 
-      async function loadEpochIntoModal(epochId) {
-        var titleEl = document.getElementById('latestRewardsTitle');
-        var metaEl = document.getElementById('latestRewardsMeta');
-        var listEl = document.getElementById('latestRewardsList');
+    <!-- Admin login -->
+    <section class="card p-5 mb-6">
+      <h2 class="text-sm font-bold">Admin Login Password</h2>
+      <p class="text-[11px] subtle mt-1">Updates the Basic Auth password for /admin/ and /admin/api/. 更新 /admin 登录密码。</p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <input id="adminBasicUserInput" value="dcaiadmin" placeholder="Username" class="bg-ink-900 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono">
+        <input id="adminBasicCurrentInput" type="password" placeholder="Current password" class="bg-ink-900 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono">
+        <input id="adminBasicNewInput" type="password" placeholder="New password" class="bg-ink-900 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono">
+        <input id="adminBasicConfirmInput" type="password" placeholder="Confirm new" class="bg-ink-900 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono">
+        <button onclick="changeAdminPassword()" class="bg-gold text-ink-950 text-[11px] font-bold px-4 py-2 rounded-lg hover:bg-gold-2">Update</button>
+      </div>
+      <div id="adminBasicStatus" class="mt-3 text-[10px] mono subtle"></div>
+    </section>
 
-        // try load archived epoch json
-        try {
-          var res = await fetch('/rewards/epochs/' + epochId + '.json', { cache: 'no-store' });
-          if (!res.ok) throw new Error('archive not found');
-          var data = await res.json();
-          window.__LATEST_REWARDS__ = data;
-        } catch (e) {
-          window.__LATEST_REWARDS__ = { epochId: epochId, totalWei: '0', claims: [] };
-        }
+    <footer class="text-center py-6 text-[10px] mono subtle uppercase tracking-[0.3em]">DCAI Foundation Control · Admin v2</footer>
+  </div>
 
-        var data2 = window.__LATEST_REWARDS__ || {};
-        var eId = data2.epochId || epochId || 'N/A';
-        var totalWei = data2.totalWei || '0';
-        titleEl.textContent = 'epoch ' + eId + ' · totalWei ' + totalWei;
-        var epochPoolWei = data2.epochPoolWei || data2.totalWei || '0';
-        var dustWei = data2.roundingDustWei || '0';
-        var sumScore = data2.sumScore == null ? '--' : formatScore(data2.sumScore, 6);
-        var cfgHash = data2.configHash ? String(data2.configHash).replace('sha256:', '').slice(0, 12) : '';
-        metaEl.textContent = 'pool ' + weiTo18(epochPoolWei) + ' tDCAI · sumScore ' + sumScore + ' · dust ' + dustWei + ' wei' + (cfgHash ? (' · cfg ' + cfgHash) : '');
+  <!-- Latest rewards modal -->
+  <div id="latestRewardsModal" class="fixed inset-0 hidden items-center justify-center bg-black/70 p-4" style="z-index:9999;">
+    <div class="w-full max-w-5xl card overflow-hidden max-h-[90vh] flex flex-col">
+      <div class="p-4 border-b border-[#232833] flex items-center justify-between gap-4">
+        <div>
+          <div class="text-[10px] uppercase tracking-widest subtle">Latest Published Reward</div>
+          <div id="latestRewardsTitle" class="text-base mono text-gold font-bold">--</div>
+          <div id="latestRewardsMeta" class="mt-1 text-[10px] mono subtle">--</div>
+          <select id="latestRewardsEpochSelect" class="mt-3 bg-ink-900 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono"></select>
+        </div>
+        <button onclick="closeLatestRewards()" class="px-3 py-1.5 rounded-lg border border-[#232833] text-[11px] font-bold hover:text-white">Close</button>
+      </div>
+      <div class="p-4 overflow-y-auto">
+        <div id="latestRewardsList" class="space-y-4"></div>
+        <div class="text-[10px] subtle mt-4">Tip: click an address to copy.</div>
+      </div>
+    </div>
+  </div>
 
-        var claims = Array.isArray(data2.claims) ? data2.claims : [];
-        renderClaimsInto(listEl, claims, data2);
-      }
+  <script>
+    const API_URL = '/admin/api';
 
-      function openLatestRewards() {
-        var modal = document.getElementById('latestRewardsModal');
-        var sel = document.getElementById('latestRewardsEpochSelect');
+    async function setCap() {
+      const cap = prompt('Set new DAILY CAP (tDCAI). Example: 300');
+      if (!cap || isNaN(cap) || parseFloat(cap) <= 0) return;
+      if (!confirm('Confirm on-chain tx: setDailyCap(' + cap + ' tDCAI)?')) return;
+      const r = await fetch(API_URL + '/set-cap', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ cap: parseFloat(cap) }) });
+      const d = await r.json();
+      if (d.success) { alert('CAP tx sent: ' + d.hash); location.reload(); } else { alert('Set cap failed: ' + (d.error || 'unknown')); }
+    }
+    async function increaseCap() {
+      const r = await fetch(API_URL + '/cap'); const d = await r.json();
+      const newCap = parseFloat(d.cap) + 100;
+      if (!confirm('Increase daily cap to ' + newCap + ' tDCAI?')) return;
+      const r2 = await fetch(API_URL + '/set-cap', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ cap: newCap }) });
+      const d2 = await r2.json();
+      if (d2.success) { alert('CAP tx sent: ' + d2.hash); location.reload(); } else { alert('Increase failed: ' + (d2.error || 'unknown')); }
+    }
 
-        var recent = window.__RECENT_REWARD_EPOCHS__ || [];
-        var data = window.__LATEST_REWARDS__ || {};
-        var epochId = data.epochId || (recent[0] || 'N/A');
-
-        if (sel) {
-          sel.innerHTML = recent.map(function(id) {
-            var selected = (id === epochId) ? ' selected' : '';
-            return '<option value="' + id + '"' + selected + '>' + id + '</option>';
-          }).join('');
-          sel.onchange = function() {
-            loadEpochIntoModal(sel.value);
-          };
-        }
-
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-        loadEpochIntoModal(epochId);
-      }
-
-      function closeLatestRewards() {
-        var modal = document.getElementById('latestRewardsModal');
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
-      }
-
-
-
-      // ---------------- API KEY APPROVALS ----------------
-      function initAdminTokenInput() {}
-
-      async function adminFetch(path, opts) {
-        return await fetch(API_URL + path, (opts || {}));
-      }
-
-      async function changeAdminPassword() {
-        const st = document.getElementById('adminBasicStatus');
-        const username = (document.getElementById('adminBasicUserInput')?.value || '').trim();
-        const currentPassword = document.getElementById('adminBasicCurrentInput')?.value || '';
-        const newPassword = document.getElementById('adminBasicNewInput')?.value || '';
-        const confirmPassword = document.getElementById('adminBasicConfirmInput')?.value || '';
-
-        if (!username) return (st.textContent = 'Username required.');
-        if (!currentPassword) return (st.textContent = 'Current password required.');
-        if (!newPassword) return (st.textContent = 'New password required.');
-        if (newPassword !== confirmPassword) return (st.textContent = 'Password confirmation mismatch.');
-
-        st.textContent = 'Updating login password…';
-        try {
-          const r = await fetch(API_URL + '/auth/change-password', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, currentPassword, newPassword, confirmPassword })
-          });
-          const d = await r.json();
-          if (!r.ok || !d.ok) throw new Error(d.error || 'update failed');
-          st.textContent = 'Login password updated. Use the new password on your next login.';
-          try {
-            document.getElementById('adminBasicCurrentInput').value = '';
-            document.getElementById('adminBasicNewInput').value = '';
-            document.getElementById('adminBasicConfirmInput').value = '';
-          } catch (e) {}
-        } catch (e) {
-          st.textContent = 'Password update failed: ' + (e?.message || e);
-        }
-      }
-
-      let apiKeyRequestsCache = [];
-      let apiKeyKeysCache = [];
-
-      function initApiKeyControls() {
-        const reqSearch = document.getElementById('requestSearchInput');
-        if (reqSearch && !reqSearch.dataset.bound) {
-          reqSearch.dataset.bound = '1';
-          reqSearch.addEventListener('input', function(){ renderApiKeyRequestsFromCache(); });
-        }
-        const reqFilter = document.getElementById('requestFilterSelect');
-        if (reqFilter && !reqFilter.dataset.bound) {
-          reqFilter.dataset.bound = '1';
-          reqFilter.addEventListener('change', function(){ renderApiKeyRequestsFromCache(); });
-        }
-        const keySearch = document.getElementById('keySearchInput');
-        if (keySearch && !keySearch.dataset.bound) {
-          keySearch.dataset.bound = '1';
-          keySearch.addEventListener('input', function(){ renderApiKeyKeys(apiKeyKeysCache); });
-        }
-      }
-
-      function parseContributorNote(note) {
-        const text = String(note || '');
-        const lines = text.replace(/\\r/g, '').split('\\n');
-        const get = (label) => {
-          const row = lines.find((line) => line.startsWith(label + ':'));
-          return row ? row.slice(label.length + 1).trim() : '';
-        };
-        return {
-          isContributor: lines[0] === 'Contributor Program Application',
-          role: get('Role'),
-          programTier: get('Program Tier'),
-          internalTier: get('Internal Tier'),
-          region: get('Region'),
-          endpoint: get('Endpoint'),
-          freeNote: get('Note'),
-        };
-      }
-
-      function renderApiKeyRequests(reqs) {
-        const el = document.getElementById('apiKeyRequestsTable');
-        if (!el) return;
-        if (!Array.isArray(reqs) || reqs.length === 0) {
-          el.innerHTML = '<div class="text-[11px] text-slate-500 font-mono">No pending requests.</div>';
-          return;
-        }
-
-        let html = '<div class="overflow-x-auto"><table class="w-full text-left text-[11px]">';
-        html += '<thead class="text-slate-500 uppercase tracking-widest text-[10px] bg-slate-900/50"><tr>';
-        html += '<th class="py-2 pr-4">ID</th><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">StakeWei</th><th class="py-2 pr-4">Created</th><th class="py-2">Action</th>';
-        html += '</tr></thead><tbody class="divide-y divide-slate-800/50">';
-
-        for (const r of reqs) {
-          const id = r.id || '';
-          const addr = r.address || '';
-          const tier = r.tier || '';
-          const stakeWei = r.stakeWei || '';
-          const created = r.createdAt || '';
-          const note = r.note || '';
-          const meta = parseContributorNote(note);
-          const safeTitle = note.replace(/"/g,'&quot;');
-
-          html += '<tr class="hover:bg-slate-800/20 align-top">';
-          html += '<td class="py-2 pr-4 font-mono text-slate-300">' + id + '</td>';
-          html += '<td class="py-2 pr-4 font-mono text-yellow-500 cursor-pointer" data-copy="' + addr + '">' + (addr ? (addr.slice(0, 10) + '…' + addr.slice(-6)) : '') + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-300 font-bold">' + tier + (meta.isContributor ? '<div class="mt-1 text-[10px] text-cyan-400">contributor</div>' : '') + '</td>';
-          html += '<td class="py-2 pr-4 font-mono text-slate-500">' + stakeWei + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-500">' + String(created).replace('T',' ').replace('Z','') + '</td>';
-          html += '<td class="py-2">' +
-            '<div class="flex flex-wrap gap-2">' +
-              '<button class="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-emerald-500/20 hover:bg-emerald-500/20" data-approve="' + id + '">APPROVE</button>' +
-              '<button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-rose-500/20 hover:bg-rose-500/20" data-reject="' + id + '">REJECT</button>' +
-            '</div>' +
-            (meta.isContributor
-              ? ('<div class="mt-2 space-y-1 text-[10px] text-slate-400">' +
-                  '<div><span class="text-slate-500">role</span> ' + (meta.role || '-') + ' · <span class="text-slate-500">program</span> ' + (meta.programTier || '-') + '</div>' +
-                  '<div><span class="text-slate-500">region</span> ' + (meta.region || '-') + '</div>' +
-                  '<div class="truncate max-w-[520px]" title="' + safeTitle + '"><span class="text-slate-500">endpoint</span> ' + (meta.endpoint || '-') + '</div>' +
-                  (meta.freeNote && meta.freeNote !== '-' ? ('<div class="truncate max-w-[520px]" title="' + safeTitle + '"><span class="text-slate-500">note</span> ' + meta.freeNote + '</div>') : '') +
-                '</div>')
-              : (note ? ('<div class="mt-1 text-[10px] text-slate-500 truncate max-w-[520px]" title="' + safeTitle + '">' + note + '</div>') : '')) +
-            '</td>';
-          html += '</tr>';
-        }
-
-        html += '</tbody></table></div>';
-        el.innerHTML = html;
-
-        try {
-          Array.from(el.querySelectorAll('[data-copy]')).forEach(function(x){
-            x.addEventListener('click', function(){ copyText(x.getAttribute('data-copy')); });
-          });
-          Array.from(el.querySelectorAll('[data-approve]')).forEach(function(b){
-            b.addEventListener('click', function(){ approveApiKey(b.getAttribute('data-approve')); });
-          });
-          Array.from(el.querySelectorAll('[data-reject]')).forEach(function(b){
-            b.addEventListener('click', function(){ rejectApiKey(b.getAttribute('data-reject')); });
-          });
-        } catch (e) {}
-      }
-
-      function renderApiKeyRequestHistory(rows) {
-        const el = document.getElementById('apiKeyRequestHistoryTable');
-        if (!el) return;
-        if (!Array.isArray(rows) || rows.length === 0) {
-          el.innerHTML = '<div class="text-[11px] text-slate-500 font-mono">No request history.</div>';
-          return;
-        }
-        const sorted = rows.slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 30);
-        let html = '<div class="overflow-x-auto"><table class="w-full text-left text-[11px]">';
-        html += '<thead class="text-slate-500 uppercase tracking-widest text-[10px] bg-slate-900/50"><tr>';
-        html += '<th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Type</th><th class="py-2 pr-4">Status</th><th class="py-2">Created</th>';
-        html += '</tr></thead><tbody class="divide-y divide-slate-800/50">';
-        for (const r of sorted) {
-          const meta = parseContributorNote(r.note || '');
-          const addr = r.address || '';
-          const status = r.status || 'pending';
-          const statusCls = status === 'approved' ? 'text-emerald-400' : status === 'rejected' ? 'text-rose-400' : 'text-yellow-400';
-          html += '<tr class="hover:bg-slate-800/20">';
-          html += '<td class="py-2 pr-4 font-mono text-yellow-500 cursor-pointer" data-copy="' + addr + '">' + (addr ? (addr.slice(0, 10) + '…' + addr.slice(-6)) : '') + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-300">' + (r.tier || '') + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-500">' + (meta.isContributor ? 'contributor' : 'app/api') + '</td>';
-          html += '<td class="py-2 pr-4 font-bold ' + statusCls + '">' + status + '</td>';
-          html += '<td class="py-2 text-slate-500">' + String(r.createdAt || '').replace('T',' ').replace('Z','') + '</td>';
-          html += '</tr>';
-        }
-        html += '</tbody></table></div>';
-        el.innerHTML = html;
-        try {
-          Array.from(el.querySelectorAll('[data-copy]')).forEach(function(x){
-            x.addEventListener('click', function(){ copyText(x.getAttribute('data-copy')); });
-          });
-        } catch (e) {}
-      }
-
-      function renderApiKeyRequestsFromCache() {
-        initApiKeyControls();
-        const q = String((document.getElementById('requestSearchInput') || {}).value || '').toLowerCase().trim();
-        const mode = String((document.getElementById('requestFilterSelect') || {}).value || 'all');
-        const pending = (apiKeyRequestsCache || []).filter(x => x.status === 'pending').filter(function(r){
-          const meta = parseContributorNote(r.note || '');
-          if (mode === 'contributor' && !meta.isContributor) return false;
-          if (mode === 'app' && meta.isContributor) return false;
-          if (!q) return true;
-          const hay = [r.address, r.tier, r.note, meta.role, meta.region, meta.endpoint, meta.programTier].join(' ').toLowerCase();
-          return hay.includes(q);
-        });
-        renderApiKeyRequests(pending);
-        renderApiKeyRequestHistory(apiKeyRequestsCache || []);
-      }
-
-      async function loadApiKeyRequests() {
-        initAdminTokenInput();
-        initApiKeyControls();
-        const st = document.getElementById('apiKeyReqStatus');
-        if (st) st.textContent = 'Loading requests…';
-        try {
-          const r = await adminFetch('/apikey/requests', { method: 'GET' });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error || 'failed');
-          apiKeyRequestsCache = d.requests || [];
-          renderApiKeyRequestsFromCache();
-          const pendingCount = apiKeyRequestsCache.filter(x => x.status === 'pending').length;
-          if (st) st.textContent = 'Loaded ' + pendingCount + ' pending request(s).';
-        } catch (e) {
-          if (st) st.textContent = 'Load failed: ' + (e?.message || e);
-        }
-      }
-
-      async function approveApiKey(id) {
-        if (!confirm('Approve request ' + id + '? This will generate an API key + reload nginx.')) return;
-        const st = document.getElementById('apiKeyReqStatus');
-        if (st) st.textContent = 'Approving…';
-        try {
-          const r = await adminFetch('/apikey/approve', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: id })
-          });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error || 'approve failed');
-          alert('Approved!\\nTier: ' + d.tier + '\\nAddress: ' + d.address + '\\nAPI Key: ' + d.key);
-          if (st) st.textContent = 'Approved ' + id;
-          refreshAdminData();
-          loadApiKeyKeys();
-        } catch (e) {
-          if (st) st.textContent = 'Approve failed: ' + (e?.message || e);
-          alert('Approve failed: ' + (e?.message || e));
-        }
-      }
-
-      async function rejectApiKey(id) {
-        const reason = prompt('Reject request ' + id + '. Optional reason:') || '';
-        if (!confirm('Reject request ' + id + '?')) return;
-        const st = document.getElementById('apiKeyReqStatus');
-        if (st) st.textContent = 'Rejecting…';
-        try {
-          const r = await adminFetch('/apikey/reject', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: id, reason: reason })
-          });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error || 'reject failed');
-          if (st) st.textContent = 'Rejected ' + id;
-          refreshAdminData();
-          loadApiKeyRequests();
-        } catch (e) {
-          if (st) st.textContent = 'Reject failed: ' + (e?.message || e);
-          alert('Reject failed: ' + (e?.message || e));
-        }
-      }
-
-      async function revokeKey() {
-        initAdminTokenInput();
-        const input = document.getElementById('revokeKeyInput');
-        const key = (input && input.value) ? input.value.trim() : '';
-        if (!key) return alert('Paste key first');
-        if (!confirm('Revoke this key? This will remove it from nginx and reload.')) return;
-        const st = document.getElementById('apiKeyReqStatus');
-        if (st) st.textContent = 'Revoking…';
-        try {
-          const r = await adminFetch('/apikey/revoke', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: key })
-          });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error || 'revoke failed');
-          alert('Revoked.');
-          if (st) st.textContent = 'Revoked key.';
-          if (input) input.value = '';
-          loadApiKeyKeys();
-          loadStakeWatch();
-        } catch (e) {
-          if (st) st.textContent = 'Revoke failed: ' + (e?.message || e);
-          alert('Revoke failed: ' + (e?.message || e));
-        }
-      }
-
-      async function revokeKeyById(id, keyPrefix) {
-        initAdminTokenInput();
-        if (!id) return;
-        if (!confirm('Revoke key ' + (keyPrefix || id) + '? This will remove it from nginx and reload.')) return;
-        const st = document.getElementById('apiKeyReqStatus');
-        if (st) st.textContent = 'Revoking…';
-        try {
-          const r = await adminFetch('/apikey/revoke', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: id })
-          });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error || 'revoke failed');
-          if (st) st.textContent = 'Revoked ' + (d.keyPrefix || keyPrefix || id) + '.';
-          loadApiKeyKeys();
-          loadStakeWatch();
-        } catch (e) {
-          if (st) st.textContent = 'Revoke failed: ' + (e?.message || e);
-          alert('Revoke failed: ' + (e?.message || e));
-        }
-      }
-
-      async function rotateKeyById(id, keyPrefix) {
-        initAdminTokenInput();
-        if (!id) return;
-        if (!confirm('Rotate key ' + (keyPrefix || id) + '? Old key will be revoked and a new key will be issued.')) return;
-        const st = document.getElementById('apiKeyReqStatus');
-        if (st) st.textContent = 'Rotating…';
-        try {
-          const r = await adminFetch('/apikey/rotate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: id })
-          });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error || 'rotate failed');
-          alert('Rotated!\\nTier: ' + d.tier + '\\nAddress: ' + d.address + '\\nNew API Key: ' + d.key);
-          if (st) st.textContent = 'Rotated ' + (keyPrefix || id) + '.';
-          loadApiKeyKeys();
-          loadStakeWatch();
-        } catch (e) {
-          if (st) st.textContent = 'Rotate failed: ' + (e?.message || e);
-          alert('Rotate failed: ' + (e?.message || e));
-        }
-      }
-
-      function renderApiKeyKeys(keys) {
-        const el = document.getElementById('apiKeyKeysTable');
-        if (!el) return;
-        const q = String((document.getElementById('keySearchInput') || {}).value || '').toLowerCase().trim();
-        const rows = (Array.isArray(keys) ? keys : []).filter(function(k){
-          if (!q) return true;
-          const hay = [k.keyPrefix, k.address, k.tier, k.status].join(' ').toLowerCase();
-          return hay.includes(q);
-        });
-        if (rows.length === 0) {
-          el.innerHTML = '<div class="text-[11px] text-slate-500 font-mono">No keys.</div>';
-          return;
-        }
-        let html = '<div class="overflow-x-auto"><table class="w-full text-left text-[11px]">';
-        html += '<thead class="text-slate-500 uppercase tracking-widest text-[10px] bg-slate-900/50"><tr>';
-        html += '<th class="py-2 pr-4">KeyPrefix</th><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Status</th><th class="py-2 pr-4">Created</th><th class="py-2">Action</th>';
-        html += '</tr></thead><tbody class="divide-y divide-slate-800/50">';
-        for (const k of rows) {
-          html += '<tr class="hover:bg-slate-800/20">';
-          html += '<td class="py-2 pr-4 font-mono text-slate-300">' + (k.keyPrefix || '') + '</td>';
-          html += '<td class="py-2 pr-4 font-mono text-yellow-500 cursor-pointer" data-copy="' + (k.address || '') + '">' + (k.address ? (k.address.slice(0,10) + '…' + k.address.slice(-6)) : '') + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-300 font-bold">' + (k.tier || '') + '</td>';
-          html += '<td class="py-2 pr-4 ' + (k.status === 'active' ? 'text-emerald-400' : 'text-slate-500') + ' font-bold">' + (k.status || '') + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-500">' + String(k.createdAt || '').replace('T',' ').replace('Z','') + '</td>';
-          html += '<td class="py-2">' + (k.status === 'active'
-            ? ('<div class="flex flex-wrap gap-2">' +
-                '<button class="bg-cyan-500/10 text-cyan-300 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-cyan-500/20 hover:bg-cyan-500/20" data-rotate-id="' + (k.id || '') + '" data-rotate-prefix="' + (k.keyPrefix || '') + '">ROTATE</button>' +
-                '<button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-2xl border border-rose-500/20 hover:bg-rose-500/20" data-revoke-id="' + (k.id || '') + '" data-revoke-prefix="' + (k.keyPrefix || '') + '">REVOKE</button>' +
-              '</div>')
-            : '<span class="text-slate-600 font-mono">-</span>') + '</td>';
-          html += '</tr>';
-        }
-        html += '</tbody></table></div>';
-        el.innerHTML = html;
-
-        try {
-          Array.from(el.querySelectorAll('[data-copy]')).forEach(function(x){
-            x.addEventListener('click', function(){ copyText(x.getAttribute('data-copy')); });
-          });
-          Array.from(el.querySelectorAll('[data-revoke-id]')).forEach(function(b){
-            b.addEventListener('click', function(){ revokeKeyById(b.getAttribute('data-revoke-id'), b.getAttribute('data-revoke-prefix')); });
-          });
-          Array.from(el.querySelectorAll('[data-rotate-id]')).forEach(function(b){
-            b.addEventListener('click', function(){ rotateKeyById(b.getAttribute('data-rotate-id'), b.getAttribute('data-rotate-prefix')); });
-          });
-        } catch (e) {}
-      }
-
-      async function loadApiKeyKeys() {
-        initAdminTokenInput();
-        initApiKeyControls();
-        try {
-          const r = await adminFetch('/apikey/keys', { method: 'GET' });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error || 'failed');
-          apiKeyKeysCache = d.keys || [];
-          renderApiKeyKeys(apiKeyKeysCache);
-        } catch (e) {
-          const el = document.getElementById('apiKeyKeysTable');
-          if (el) el.innerHTML = '<div class="text-[11px] text-rose-400 font-mono">Load keys failed: ' + (e?.message || e) + '</div>';
-        }
-      }
-
-      function renderStakeWatch(rows) {
-        const el = document.getElementById('stakeWatchTable');
-        if (!el) return;
-        if (!Array.isArray(rows) || rows.length === 0) {
-          el.innerHTML = '<div class="text-[11px] text-slate-500 font-mono">No tracked stake addresses.</div>';
-          return;
-        }
-
-        let html = '<div class="overflow-x-auto"><table class="w-full text-left text-[11px]">';
-        html += '<thead class="text-slate-500 uppercase tracking-widest text-[10px] bg-slate-900/50"><tr>';
-        html += '<th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Stake</th><th class="py-2 pr-4">Unstake</th><th class="py-2 pr-4">Requested</th><th class="py-2 pr-4">Active Keys</th><th class="py-2">Hint</th>';
-        html += '</tr></thead><tbody class="divide-y divide-slate-800/50">';
-
-        for (const row of rows) {
-          const addr = row.address || '';
-          const tier = row.tier || 'none';
-          const stake = row.stake || '0';
-          const requestedAtSec = Number(row.requestedAtSec || 0);
-          const cooldownLeftSec = Number(row.cooldownLeftSec || 0);
-          const activeKeys = Array.isArray(row.activeKeys) ? row.activeKeys : [];
-          const keyList = activeKeys.map(function(k){ return (k.keyPrefix || '') + (k.tier ? ('/' + k.tier) : ''); }).join(', ');
-
-          let unstakeLabel = 'STAKED';
-          let unstakeClass = 'text-emerald-400';
-          if (row.unstakeStatus === 'withdrawable') {
-            unstakeLabel = 'WITHDRAWABLE';
-            unstakeClass = 'text-rose-400';
-          } else if (row.unstakeStatus === 'cooldown') {
-            unstakeLabel = 'COOLDOWN ' + Math.max(0, cooldownLeftSec) + 's';
-            unstakeClass = 'text-yellow-400';
-          } else if (row.unstakeStatus === 'no-stake') {
-            unstakeLabel = 'NO STAKE';
-            unstakeClass = 'text-slate-500';
-          }
-
-          let hint = '-';
-          if ((row.unstakeStatus === 'cooldown' || row.unstakeStatus === 'withdrawable') && activeKeys.length > 0) {
-            hint = 'consider revoke';
-          } else if (row.unstakeStatus === 'withdrawable' && activeKeys.length === 0) {
-            hint = 'can withdraw now';
-          } else if (row.unstakeStatus === 'staked' && activeKeys.length > 0) {
-            hint = 'key active while staked';
-          }
-
-          html += '<tr class="hover:bg-slate-800/20">';
-          html += '<td class="py-2 pr-4 font-mono text-yellow-500 cursor-pointer" data-copy="' + addr + '">' + (addr ? (addr.slice(0, 10) + '…' + addr.slice(-6)) : '') + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-300 font-bold uppercase">' + tier + '</td>';
-          html += '<td class="py-2 pr-4 font-mono text-slate-300">' + stake + ' <span class="text-slate-600">tDCAI</span></td>';
-          html += '<td class="py-2 pr-4 font-mono ' + unstakeClass + ' font-bold">' + unstakeLabel + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-500 font-mono">' + (requestedAtSec > 0 ? requestedAtSec : '-') + '</td>';
-          html += '<td class="py-2 pr-4 text-slate-300 font-mono">' + activeKeys.length + (keyList ? (' <span class="text-slate-500">(' + keyList + ')</span>') : '') + '</td>';
-          html += '<td class="py-2 text-slate-500 font-mono">' + hint + '</td>';
-          html += '</tr>';
-        }
-
-        html += '</tbody></table></div>';
-        el.innerHTML = html;
-
-        try {
-          Array.from(el.querySelectorAll('[data-copy]')).forEach(function(x){
-            x.addEventListener('click', function(){ copyText(x.getAttribute('data-copy')); });
-          });
-        } catch (e) {}
-      }
-
-      async function loadStakeWatch() {
-        initAdminTokenInput();
-        const st = document.getElementById('stakeWatchStatus');
-        if (st) st.textContent = 'Loading stake watch…';
-        try {
-          const r = await adminFetch('/stakes', { method: 'GET' });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error || 'failed');
-          renderStakeWatch(d.rows || []);
-          if (st) st.textContent = 'Loaded ' + ((d.rows || []).length) + ' tracked address(es).';
-        } catch (e) {
-          if (st) st.textContent = 'Load failed: ' + (e?.message || e);
-          const el = document.getElementById('stakeWatchTable');
-          if (el) el.innerHTML = '<div class="text-[11px] text-rose-400 font-mono">Load stakes failed: ' + (e?.message || e) + '</div>';
-        }
-      }
-
-      function refreshAdminData() {
-        loadApiKeyRequests();
-        loadStakeWatch();
-      }
-
-      window.copyText = copyText;
-      window.topup = topup;
-      window.customTopup = customTopup;
-      window.openLatestRewards = openLatestRewards;
-      window.closeLatestRewards = closeLatestRewards;
-      window.increaseCap = increaseCap;
-      window.setCap = setCap;
-      window.saveWeights = saveWeights;
-      window.refreshAdminData = refreshAdminData;
-      window.revokeKey = revokeKey;
-      window.loadApiKeyKeys = loadApiKeyKeys;
-      window.loadStakeWatch = loadStakeWatch;
-      window.changeAdminPassword = changeAdminPassword;
-
-      document.addEventListener('click', function(e) {
-        var modal = document.getElementById('latestRewardsModal');
-        if (!modal.classList.contains('hidden') && e.target === modal) {
-          closeLatestRewards();
-        }
+    function updateLabels() {
+      const keys = ['rpc','indexer','storage','multiregion'];
+      const vals = {}; let sum = 0;
+      keys.forEach(k => { vals[k] = parseInt(document.getElementById(k + 'Weight').value) || 0; sum += vals[k]; });
+      const s = sum || 1;
+      keys.forEach(k => {
+        document.getElementById(k + 'WeightLabel').innerText = vals[k];
+        document.getElementById(k + 'WeightPct').innerText = ((vals[k] / s) * 100).toFixed(0);
       });
-    </script>
+      document.getElementById('weightTotal').innerText = sum;
+    }
 
+    async function saveWeights() {
+      const btn = document.getElementById('saveBtn'); const orig = btn.innerText;
+      btn.innerText = 'Saving…'; btn.disabled = true;
+      try {
+        const body = {
+          rpc: parseInt(document.getElementById('rpcWeight').value) || 0,
+          indexer: parseInt(document.getElementById('indexerWeight').value) || 0,
+          storage: parseInt(document.getElementById('storageWeight').value) || 0,
+          multiregion: parseInt(document.getElementById('multiregionWeight').value) || 0,
+        };
+        const r = await fetch(API_URL + '/update-weights', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const d = await r.json();
+        if (!r.ok || !d.success) throw new Error(d.error || 'save failed');
+        btn.innerText = 'Saved ✓'; btn.classList.remove('bg-gold'); btn.classList.add('bg-emerald-500');
+        setTimeout(() => location.reload(), 1200);
+      } catch (e) { alert('Save weights failed: ' + (e?.message || e)); btn.innerText = orig; btn.disabled = false; }
+    }
+
+    async function topup(amount) {
+      if (!confirm('Authorize transfer of ' + amount + ' tDCAI to distributor?')) return;
+      try {
+        const r = await fetch(API_URL + '/topup', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ amount }) });
+        const d = await r.json();
+        if (d.success) { alert('Top-up sent: ' + d.hash); location.reload(); } else { alert('Top-up failed: ' + (d.error || 'unknown')); }
+      } catch (e) { alert(e.message); }
+    }
+    function customTopup() { const a = prompt('Amount (tDCAI):'); if (a && !isNaN(a)) topup(parseFloat(a)); }
+
+    function copyText(text) {
+      const toast = () => { const t = document.createElement('div'); t.className='fixed bottom-8 left-1/2 -translate-x-1/2 bg-gold text-ink-950 px-5 py-2.5 rounded-xl text-[10px] font-bold shadow-2xl z-[10000]'; t.innerText='Copied: ' + text; document.body.appendChild(t); setTimeout(()=>t.remove(),2000); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(toast).catch(()=>fb(text)); else fb(text);
+      function fb(x){ try{ const ta=document.createElement('textarea'); ta.value=x; ta.style.position='fixed'; ta.style.left='-9999px'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast(); }catch(e){ alert('Copy failed'); } }
+    }
+
+    async function loadHealth() {
+      try {
+        const r = await fetch('/admin/health.json', { cache:'no-store' }); const d = await r.json();
+        const ua = document.getElementById('healthUpdatedAt'); if (ua) ua.innerText = d.generatedAt ? ('Updated: ' + new Date(d.generatedAt).toLocaleString()) : '';
+        const rows = []; const add = (name,obj)=>{ if(!obj) return; const ok=obj.ok===true; rows.push({name,status:ok?'OK':'DOWN',ms:obj.ms!=null?Math.round(obj.ms):null,info:ok?(obj.status!=null?('HTTP '+obj.status):''):(obj.error||'')}); };
+        add('Infra: nginx /', d.nodes?.Infra?.nginx); add('Infra: faucet :8080', d.nodes?.Infra?.faucet); add('Infra: adminApi :3001', d.nodes?.Infra?.adminApi);
+        add('RPC1: eth_chainId', d.nodes?.RPC1?.rpc); add('RPC2: eth_chainId', d.nodes?.RPC2?.rpc);
+        add('Signer1: ssh', d.nodes?.Signer1?.ssh); add('Signer2: ssh', d.nodes?.Signer2?.ssh); add('Signer3: ssh', d.nodes?.Signer3?.ssh); add('Indexer: ssh', d.nodes?.Indexer?.ssh);
+        let h = '<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Target</th><th class="py-2 pr-4">Status</th><th class="py-2 pr-4">Latency</th><th class="py-2">Info</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
+        for (const row of rows) { const cls=row.status==='OK'?'text-emerald-400':'text-rose-400'; h += '<tr><td class="py-2 pr-4 mono text-[#a2a9b4]">'+row.name+'</td><td class="py-2 pr-4 '+cls+' font-bold">'+row.status+'</td><td class="py-2 pr-4 mono subtle">'+(row.ms==null?'':row.ms+'ms')+'</td><td class="py-2 mono subtle truncate">'+(row.info||'')+'</td></tr>'; }
+        h += '</tbody></table></div>';
+        const el = document.getElementById('healthTable'); if (el) el.innerHTML = h;
+        const byIp = { '45.76.190.151':d.nodes?.Signer1?.ssh, '139.180.188.167':d.nodes?.Signer2?.ssh, '45.76.145.198':d.nodes?.Signer3?.ssh, '139.180.188.61':d.nodes?.RPC1?.rpc, '207.148.72.238':d.nodes?.RPC2?.rpc, '139.180.141.226':d.nodes?.Indexer?.ssh, '139.180.140.143':d.nodes?.Infra?.nginx };
+        for (const [ip,obj] of Object.entries(byIp)) { const id=ip.replaceAll('.','_'); const ok=obj?.ok===true; const ms=obj?.ms!=null?Math.round(obj.ms):null; const ts=d.generatedAt?new Date(d.generatedAt).toLocaleTimeString():'';
+          const dot=document.getElementById('dot_'+id), st=document.getElementById('st_'+id), tsEl=document.getElementById('ts_'+id), msEl=document.getElementById('ms_'+id);
+          if(dot){ dot.className='w-1.5 h-1.5 rounded-full ' + (ok?'bg-emerald-500':'bg-rose-500'); }
+          if(st){ st.innerText=ok?'OK':'DOWN'; st.className='text-[9px] font-bold ' + (ok?'text-emerald-400':'text-rose-400'); }
+          if(tsEl) tsEl.innerText=ts||'--'; if(msEl) msEl.innerText=(ms==null?'--':ms+'ms');
+        }
+      } catch (e) { const el=document.getElementById('healthTable'); if(el) el.innerText='Health load failed: '+(e?.message||e); }
+    }
+
+    // ---- rewards modal ----
+    window.__LATEST_REWARDS__ = ${JSON.stringify(latestRewards || {})};
+    window.__RECENT_REWARD_EPOCHS__ = ${JSON.stringify(recentRewardEpochIds || [])};
+    function weiTo18(w){ try{ let s=BigInt(w||'0').toString(); if(s.length<=18) s='0'.repeat(18-s.length+1)+s; return s.slice(0,-18)+'.'+s.slice(-18).slice(0,6); }catch(e){ return '--'; } }
+    function fPct(v,d){ if(v==null||isNaN(Number(v))) return '--'; return (Number(v)*100).toFixed(d==null?2:d)+'%'; }
+    function fScore(v,d){ if(v==null||isNaN(Number(v))) return '--'; return Number(v).toFixed(d==null?4:d); }
+    function svcCard(name, svc){ if(!svc) return ''; const on=!!svc.enabled; return '<div class="p-3 rounded-lg bg-ink-900 border border-[#232833]"><div class="flex justify-between mb-1"><span class="text-[11px] font-bold uppercase tracking-widest">'+name+'</span><span class="mono text-[10px] '+(on?'text-emerald-400':'subtle')+'">'+(on?'ENABLED':'DISABLED')+' · w'+(svc.weight==null?'--':svc.weight)+'</span></div><div class="text-[10px] mono subtle">raw '+fScore(svc.rawScore,4)+' · weighted <span class="text-gold">'+fScore(svc.weightedScore,4)+'</span></div></div>'; }
+    function renderClaims(listEl, claims){
+      if(!claims.length){ listEl.innerHTML='<div class="text-[11px] subtle">No claims for this epoch.</div>'; return; }
+      listEl.innerHTML = claims.map(function(c){ const b=c.breakdown||{}; return '<div class="p-4 rounded-xl bg-ink-900 border border-[#232833]"><div class="flex flex-wrap items-start justify-between gap-3 mb-3"><div><div class="text-[10px] uppercase tracking-widest subtle">Operator</div><div class="mono text-[12px] text-gold break-all cursor-pointer" data-copy="'+(c.operator||'')+'">'+(c.operator||'--')+'</div></div><div class="grid grid-cols-3 gap-2 text-center"><div class="px-3 py-1.5 rounded-lg bg-ink-850 border border-[#232833]"><div class="text-[9px] subtle uppercase">Amount</div><div class="mono text-gold text-[12px] font-bold">'+weiTo18(c.amountWei)+'</div></div><div class="px-3 py-1.5 rounded-lg bg-ink-850 border border-[#232833]"><div class="text-[9px] subtle uppercase">Score</div><div class="mono text-emerald-400 text-[12px] font-bold">'+fScore(c.totalScore,4)+'</div></div><div class="px-3 py-1.5 rounded-lg bg-ink-850 border border-[#232833]"><div class="text-[9px] subtle uppercase">Share</div><div class="mono text-aqua text-[12px] font-bold">'+fPct(c.sharePct,2)+'</div></div></div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-2">'+svcCard('RPC',b.rpc)+svcCard('Indexer',b.indexer)+svcCard('Storage',b.storage)+svcCard('Multi-region',b.multiregion)+'</div></div>'; }).join('');
+      Array.from(listEl.querySelectorAll('[data-copy]')).forEach(el=>el.addEventListener('click',()=>copyText(el.getAttribute('data-copy'))));
+    }
+    async function loadEpochIntoModal(epochId){
+      const titleEl=document.getElementById('latestRewardsTitle'), metaEl=document.getElementById('latestRewardsMeta'), listEl=document.getElementById('latestRewardsList');
+      let data;
+      try{ const res=await fetch('/rewards/epochs/'+epochId+'.json',{cache:'no-store'}); if(!res.ok) throw 0; data=await res.json(); }catch(e){ data=window.__LATEST_REWARDS__||{epochId,totalWei:'0',claims:[]}; }
+      titleEl.textContent='epoch '+(data.epochId||epochId)+' · '+weiTo18(data.totalWei||'0')+' tDCAI';
+      metaEl.textContent='pool '+weiTo18(data.epochPoolWei||data.totalWei||'0')+' tDCAI · sumScore '+fScore(data.sumScore,4)+' · weights '+JSON.stringify(data.weights||{});
+      renderClaims(listEl, Array.isArray(data.claims)?data.claims:[]);
+    }
+    function openLatestRewards(){
+      const modal=document.getElementById('latestRewardsModal'), sel=document.getElementById('latestRewardsEpochSelect');
+      const recent=window.__RECENT_REWARD_EPOCHS__||[]; const data=window.__LATEST_REWARDS__||{}; const epochId=data.epochId||(recent[0]||'N/A');
+      if(sel){ sel.innerHTML=recent.map(id=>'<option value="'+id+'"'+(id===epochId?' selected':'')+'>'+id+'</option>').join(''); sel.onchange=()=>loadEpochIntoModal(sel.value); }
+      modal.classList.remove('hidden'); modal.classList.add('flex'); loadEpochIntoModal(epochId);
+    }
+    function closeLatestRewards(){ const m=document.getElementById('latestRewardsModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+
+    // ---- api keys ----
+    async function adminFetch(path, opts){ return await fetch(API_URL + path, opts || {}); }
+    let apiKeyRequestsCache = [], apiKeyKeysCache = [];
+
+    function initControls(){
+      const bind=(id,ev,fn)=>{ const el=document.getElementById(id); if(el&&!el.dataset.bound){ el.dataset.bound='1'; el.addEventListener(ev,fn); } };
+      bind('requestSearchInput','input',renderRequestsFromCache);
+      bind('requestFilterSelect','change',renderRequestsFromCache);
+      bind('keySearchInput','input',()=>renderKeys(apiKeyKeysCache));
+    }
+    function parseNote(note){
+      const lines=String(note||'').replace(/\\r/g,'').split('\\n');
+      const get=l=>{ const row=lines.find(x=>x.startsWith(l+':')); return row?row.slice(l.length+1).trim():''; };
+      return { isContributor: lines[0]==='Contributor Program Application', role:get('Role'), programTier:get('Program Tier'), region:get('Region'), endpoint:get('Endpoint'), freeNote:get('Note') };
+    }
+    function sourceBadge(src){ const c = src==='contributor' ? 'text-aqua border-aqua/30 bg-aqua/10' : 'text-gold border-gold/30 bg-gold/10'; return '<span class="inline-block mono text-[9px] px-1.5 py-0.5 rounded border '+c+'">'+(src||'developer')+'</span>'; }
+
+    function renderRequests(reqs){
+      const el=document.getElementById('apiKeyRequestsTable'); if(!el) return;
+      if(!reqs.length){ el.innerHTML='<div class="text-[11px] subtle mono">No pending requests.</div>'; return; }
+      let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Source</th><th class="py-2 pr-4">Created</th><th class="py-2">Action</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
+      for(const r of reqs){ const src=r.source||(parseNote(r.note).isContributor?'contributor':'developer'); const m=parseNote(r.note); const t=(r.note||'').replace(/"/g,'&quot;');
+        h+='<tr class="align-top"><td class="py-2 pr-4 mono text-gold cursor-pointer" data-copy="'+(r.address||'')+'">'+(r.address?(r.address.slice(0,10)+'…'+r.address.slice(-6)):'')+'</td>';
+        h+='<td class="py-2 pr-4 font-bold">'+(r.tier||'')+'</td>';
+        h+='<td class="py-2 pr-4">'+sourceBadge(src)+'</td>';
+        h+='<td class="py-2 pr-4 subtle">'+String(r.createdAt||'').replace('T',' ').replace('Z','')+'</td>';
+        h+='<td class="py-2"><div class="flex gap-2"><button class="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-emerald-500/20 hover:bg-emerald-500/20" data-approve="'+r.id+'">APPROVE</button><button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-rose-500/20 hover:bg-rose-500/20" data-reject="'+r.id+'">REJECT</button></div>';
+        if(m.isContributor){ h+='<div class="mt-2 text-[10px] subtle">role '+(m.role||'-')+' · region '+(m.region||'-')+' · <span title="'+t+'">endpoint '+(m.endpoint||'-')+'</span></div>'; }
+        else if(r.note){ h+='<div class="mt-1 text-[10px] subtle truncate max-w-[420px]" title="'+t+'">'+r.note+'</div>'; }
+        h+='</td></tr>';
+      }
+      h+='</tbody></table></div>'; el.innerHTML=h;
+      Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
+      Array.from(el.querySelectorAll('[data-approve]')).forEach(b=>b.addEventListener('click',()=>approveKey(b.getAttribute('data-approve'))));
+      Array.from(el.querySelectorAll('[data-reject]')).forEach(b=>b.addEventListener('click',()=>rejectKey(b.getAttribute('data-reject'))));
+    }
+    function renderHistory(rows){
+      const el=document.getElementById('apiKeyRequestHistoryTable'); if(!el) return;
+      if(!rows.length){ el.innerHTML='<div class="text-[11px] subtle mono">No history.</div>'; return; }
+      const sorted=rows.slice().sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).slice(0,30);
+      let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Source</th><th class="py-2 pr-4">Status</th><th class="py-2">Created</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
+      for(const r of sorted){ const src=r.source||(parseNote(r.note).isContributor?'contributor':'developer'); const st=r.status||'pending'; const cls=st==='approved'?'text-emerald-400':st==='rejected'?'text-rose-400':'text-gold';
+        h+='<tr><td class="py-2 pr-4 mono text-gold cursor-pointer" data-copy="'+(r.address||'')+'">'+(r.address?(r.address.slice(0,10)+'…'+r.address.slice(-6)):'')+'</td><td class="py-2 pr-4">'+(r.tier||'')+'</td><td class="py-2 pr-4">'+sourceBadge(src)+'</td><td class="py-2 pr-4 font-bold '+cls+'">'+st+'</td><td class="py-2 subtle">'+String(r.createdAt||'').replace('T',' ').replace('Z','')+'</td></tr>';
+      }
+      h+='</tbody></table></div>'; el.innerHTML=h;
+      Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
+    }
+    function renderRequestsFromCache(){
+      initControls();
+      const q=String((document.getElementById('requestSearchInput')||{}).value||'').toLowerCase().trim();
+      const mode=String((document.getElementById('requestFilterSelect')||{}).value||'all');
+      const pending=(apiKeyRequestsCache||[]).filter(x=>x.status==='pending').filter(function(r){
+        const src=r.source||(parseNote(r.note).isContributor?'contributor':'developer');
+        if(mode!=='all' && src!==mode) return false;
+        if(!q) return true;
+        const m=parseNote(r.note); return [r.address,r.tier,r.note,m.role,m.region,m.endpoint].join(' ').toLowerCase().includes(q);
+      });
+      renderRequests(pending); renderHistory(apiKeyRequestsCache||[]);
+    }
+    async function loadRequests(){
+      initControls(); const st=document.getElementById('apiKeyReqStatus'); if(st) st.textContent='Loading requests…';
+      try{ const r=await adminFetch('/apikey/requests'); const d=await r.json(); if(!d.ok) throw new Error(d.error||'failed'); apiKeyRequestsCache=d.requests||[]; renderRequestsFromCache(); const p=apiKeyRequestsCache.filter(x=>x.status==='pending').length; if(st) st.textContent='Loaded '+p+' pending request(s).'; }
+      catch(e){ if(st) st.textContent='Load failed: '+(e?.message||e); }
+    }
+    async function approveKey(id){
+      if(!confirm('Approve request '+id+'? Generates an API key + reloads nginx.')) return;
+      const st=document.getElementById('apiKeyReqStatus'); if(st) st.textContent='Approving…';
+      try{ const r=await adminFetch('/apikey/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); const d=await r.json(); if(!d.ok) throw new Error(d.error||'approve failed'); alert('Approved!\\nTier: '+d.tier+'\\nAddress: '+d.address+'\\nAPI Key: '+d.key); refreshAll(); }
+      catch(e){ if(st) st.textContent='Approve failed: '+(e?.message||e); alert('Approve failed: '+(e?.message||e)); }
+    }
+    async function rejectKey(id){
+      const reason=prompt('Reject '+id+'. Optional reason:')||''; if(!confirm('Reject request '+id+'?')) return;
+      const st=document.getElementById('apiKeyReqStatus'); if(st) st.textContent='Rejecting…';
+      try{ const r=await adminFetch('/apikey/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,reason})}); const d=await r.json(); if(!d.ok) throw new Error(d.error||'reject failed'); refreshAll(); }
+      catch(e){ if(st) st.textContent='Reject failed: '+(e?.message||e); alert('Reject failed: '+(e?.message||e)); }
+    }
+    function renderKeys(keys){
+      const el=document.getElementById('apiKeyKeysTable'); if(!el) return;
+      const q=String((document.getElementById('keySearchInput')||{}).value||'').toLowerCase().trim();
+      const rows=(Array.isArray(keys)?keys:[]).filter(k=>!q||[k.keyPrefix,k.address,k.tier,k.status,k.source].join(' ').toLowerCase().includes(q));
+      if(!rows.length){ el.innerHTML='<div class="text-[11px] subtle mono">No keys.</div>'; return; }
+      let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Prefix</th><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Source</th><th class="py-2 pr-4">Status</th><th class="py-2 pr-4">Created</th><th class="py-2">Action</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
+      for(const k of rows){ h+='<tr><td class="py-2 pr-4 mono text-[#a2a9b4]">'+(k.keyPrefix||'')+'…</td><td class="py-2 pr-4 mono text-gold cursor-pointer" data-copy="'+(k.address||'')+'">'+(k.address?(k.address.slice(0,10)+'…'+k.address.slice(-6)):'')+'</td><td class="py-2 pr-4 font-bold">'+(k.tier||'')+'</td><td class="py-2 pr-4">'+sourceBadge(k.source)+'</td><td class="py-2 pr-4 '+(k.status==='active'?'text-emerald-400':'subtle')+' font-bold">'+(k.status||(k.active?'active':'revoked'))+'</td><td class="py-2 pr-4 subtle">'+String(k.createdAt||'').replace('T',' ').replace('Z','')+'</td><td class="py-2">'+((k.active||k.status==='active')?('<div class="flex gap-2"><button class="bg-aqua/10 text-aqua text-[10px] font-bold px-3 py-1.5 rounded-lg border border-aqua/20 hover:bg-aqua/20" data-rotate="'+(k.id||'')+'" data-rp="'+(k.keyPrefix||'')+'">ROTATE</button><button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-rose-500/20 hover:bg-rose-500/20" data-revoke="'+(k.id||'')+'" data-rp="'+(k.keyPrefix||'')+'">REVOKE</button></div>'):'<span class="subtle">-</span>')+'</td></tr>'; }
+      h+='</tbody></table></div>'; el.innerHTML=h;
+      Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
+      Array.from(el.querySelectorAll('[data-revoke]')).forEach(b=>b.addEventListener('click',()=>revokeById(b.getAttribute('data-revoke'),b.getAttribute('data-rp'))));
+      Array.from(el.querySelectorAll('[data-rotate]')).forEach(b=>b.addEventListener('click',()=>rotateById(b.getAttribute('data-rotate'),b.getAttribute('data-rp'))));
+    }
+    async function loadKeys(){
+      initControls();
+      try{ const r=await adminFetch('/apikey/keys'); const d=await r.json(); if(!d.ok) throw new Error(d.error||'failed'); apiKeyKeysCache=d.keys||[]; renderKeys(apiKeyKeysCache); }
+      catch(e){ const el=document.getElementById('apiKeyKeysTable'); if(el) el.innerHTML='<div class="text-[11px] text-rose-400 mono">Load keys failed: '+(e?.message||e)+'</div>'; }
+    }
+    async function revokeById(id,prefix){ if(!id) return; if(!confirm('Revoke key '+(prefix||id)+'? Removes from nginx + reload.')) return;
+      try{ const r=await adminFetch('/apikey/revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); const d=await r.json(); if(!d.ok) throw new Error(d.error||'revoke failed'); refreshAll(); }catch(e){ alert('Revoke failed: '+(e?.message||e)); } }
+    async function rotateById(id,prefix){ if(!id) return; if(!confirm('Rotate key '+(prefix||id)+'? Old key revoked, new key issued.')) return;
+      try{ const r=await adminFetch('/apikey/rotate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); const d=await r.json(); if(!d.ok) throw new Error(d.error||'rotate failed'); alert('Rotated!\\nTier: '+d.tier+'\\nAddress: '+d.address+'\\nNew API Key: '+d.key); refreshAll(); }catch(e){ alert('Rotate failed: '+(e?.message||e)); } }
+
+    async function loadLegacyKeys(){
+      const el=document.getElementById('legacyKeysTable'); if(!el) return;
+      try{ const r=await adminFetch('/legacy-keys'); const d=await r.json(); if(!d.ok) throw new Error(d.error||'failed');
+        if(!d.keys||!d.keys.length){ el.innerHTML='<div class="text-[11px] subtle mono">None found in nginx map.</div>'; return; }
+        let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Key (masked)</th><th class="py-2 pr-4">Type</th><th class="py-2">Copy</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
+        for(const k of d.keys){ const masked=k.slice(0,6)+'…'+k.slice(-4); h+='<tr><td class="py-2 pr-4 mono text-rose-300">'+masked+'</td><td class="py-2 pr-4"><span class="mono text-[9px] px-1.5 py-0.5 rounded border border-rose-500/30 text-rose-400 bg-rose-500/10">legacy master</span></td><td class="py-2"><button class="text-[10px] mono px-2 py-1 rounded border border-[#232833] text-[#a2a9b4] hover:text-white" data-copy="'+k+'">copy full</button></td></tr>'; }
+        h+='</tbody></table></div>'; el.innerHTML=h;
+        Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
+      }catch(e){ el.innerHTML='<div class="text-[11px] text-rose-400 mono">Load legacy keys failed: '+(e?.message||e)+'</div>'; }
+    }
+
+    function renderStakeWatch(rows){
+      const el=document.getElementById('stakeWatchTable'); if(!el) return;
+      if(!rows.length){ el.innerHTML='<div class="text-[11px] subtle mono">No tracked addresses.</div>'; return; }
+      let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Stake</th><th class="py-2 pr-4">Unstake</th><th class="py-2 pr-4">Keys</th><th class="py-2">Hint</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
+      for(const r of rows){ let lbl='STAKED',cls='text-emerald-400'; if(r.unstakeStatus==='withdrawable'){lbl='WITHDRAWABLE';cls='text-rose-400';} else if(r.unstakeStatus==='cooldown'){lbl='COOLDOWN '+Math.max(0,r.cooldownLeftSec)+'s';cls='text-gold';} else if(r.unstakeStatus==='no-stake'){lbl='NO STAKE';cls='subtle';}
+        const keys=(r.activeKeys||[]).map(k=>(k.keyPrefix||'')+(k.tier?('/'+k.tier):'')).join(', ');
+        let hint='-'; if((r.unstakeStatus==='cooldown'||r.unstakeStatus==='withdrawable')&&(r.activeKeys||[]).length>0) hint='consider revoke'; else if(r.unstakeStatus==='staked'&&(r.activeKeys||[]).length>0) hint='key active while staked';
+        h+='<tr><td class="py-2 pr-4 mono text-gold cursor-pointer" data-copy="'+(r.address||'')+'">'+(r.address?(r.address.slice(0,10)+'…'+r.address.slice(-6)):'')+'</td><td class="py-2 pr-4 font-bold uppercase">'+(r.tier||'none')+'</td><td class="py-2 pr-4 mono">'+(r.stake||'0')+'</td><td class="py-2 pr-4 mono font-bold '+cls+'">'+lbl+'</td><td class="py-2 pr-4 mono">'+((r.activeKeys||[]).length)+(keys?(' <span class="subtle">('+keys+')</span>'):'')+'</td><td class="py-2 subtle mono">'+hint+'</td></tr>';
+      }
+      h+='</tbody></table></div>'; el.innerHTML=h;
+      Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
+    }
+    async function loadStakeWatch(){
+      const st=document.getElementById('stakeWatchStatus'); if(st) st.textContent='Loading stake watch…';
+      try{ const r=await adminFetch('/stakes'); const d=await r.json(); if(!d.ok) throw new Error(d.error||'failed'); renderStakeWatch(d.rows||[]); if(st) st.textContent='Loaded '+((d.rows||[]).length)+' address(es).'; }
+      catch(e){ if(st) st.textContent='Load failed: '+(e?.message||e); const el=document.getElementById('stakeWatchTable'); if(el) el.innerHTML='<div class="text-[11px] text-rose-400 mono">Load stakes failed: '+(e?.message||e)+'</div>'; }
+    }
+
+    async function changeAdminPassword(){
+      const st=document.getElementById('adminBasicStatus');
+      const username=(document.getElementById('adminBasicUserInput')?.value||'').trim();
+      const currentPassword=document.getElementById('adminBasicCurrentInput')?.value||'';
+      const newPassword=document.getElementById('adminBasicNewInput')?.value||'';
+      const confirmPassword=document.getElementById('adminBasicConfirmInput')?.value||'';
+      if(!username) return st.textContent='Username required.';
+      if(!currentPassword) return st.textContent='Current password required.';
+      if(!newPassword) return st.textContent='New password required.';
+      if(newPassword!==confirmPassword) return st.textContent='Confirmation mismatch.';
+      st.textContent='Updating…';
+      try{ const r=await fetch(API_URL+'/auth/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,currentPassword,newPassword,confirmPassword})}); const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||'failed'); st.textContent='Password updated. Use it on next login.'; ['adminBasicCurrentInput','adminBasicNewInput','adminBasicConfirmInput'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';}); }
+      catch(e){ st.textContent='Update failed: '+(e?.message||e); }
+    }
+
+    function refreshAll(){ loadRequests(); loadKeys(); loadLegacyKeys(); loadStakeWatch(); }
+
+    document.addEventListener('click', function(e){ const m=document.getElementById('latestRewardsModal'); if(!m.classList.contains('hidden') && e.target===m) closeLatestRewards(); });
+
+    // init
+    try{ updateLabels(); }catch(e){}
+    try{ loadHealth(); refreshAll(); }catch(e){}
+    setInterval(loadHealth, 60000);
+  </script>
 </body>
 </html>
 `;
   fs.writeFileSync('/var/www/html/admin/index.html', html);
+  console.log('dashboard written', new Date().toISOString());
 }
 
 main().catch(console.error);
