@@ -3,12 +3,15 @@ import { navigateTo, FX_OFF } from '../lib/api';
 import { shortAddr } from '../lib/format';
 import { LivePill } from './ui';
 
-// Live chain visualization: the most recent blocks as neon nodes (colored by
-// Clique signer), ambient transaction dots streaming toward the pulsing
-// "incoming" slot, and a one-shot slide when a new block seals. One canvas,
-// one rAF loop; paused when the tab is hidden. Under prefers-reduced-motion
-// or ?fx=off the panel renders a fully settled static frame (no slide is ever
-// armed and the incoming slot stays visible).
+// Live chain visualization. Color language: settled blocks are uniform dim
+// gold; ONLY the newest sealed block is cyan and the incoming slot is gold —
+// the two brand colors carry the "now" of the chain. Node size scales with
+// the block's transaction count. Sealing a block fires a burst: ripple
+// rings + particles at the seal point, a white-hot border cooling to cyan,
+// and an energy wave running left along the chain line.
+// One canvas, one rAF loop; paused when the tab is hidden. Under
+// prefers-reduced-motion or ?fx=off the panel renders a settled static frame
+// (no slide/burst is ever armed).
 
 export type PulseBlock = {
   height: number;
@@ -17,19 +20,28 @@ export type PulseBlock = {
   timestamp?: string;
 };
 
-export const SIGNER_COLORS = ['#f0b90b', '#22d3ee', '#c084fc', '#34d399', '#fb7185'];
+const GOLD = '240,185,11';
+const CYAN = '34,211,238';
 
 const SLOT = 92; // px per block slot
-const BLOCK_SIZE = 34;
+const BASE_SIZE = 26; // node size for an empty block
+const MAX_EXTRA = 16; // extra px at high tx counts
+const INCOMING_SIZE = 34;
 const EDGE_FADE = 96; // left fade width; outgoing blocks exit through it
 const LEGEND_MAX = 6;
 
+const sizeFor = (b: PulseBlock) => BASE_SIZE + Math.min(MAX_EXTRA, (b?.txCount || 0) * 4);
+
 type Dot = { p: number; lane: number; speed: number; hue: number };
+type Particle = { x: number; y: number; vx: number; vy: number; gold: boolean };
 
 type PulseState = {
   blocks: PulseBlock[];
   lastTop: number | null;
   shift: number; // 1 -> 0 slide progress after a new block
+  seal: number; // 1 -> 0 seal-burst progress
+  sealArm: boolean; // set on new block; consumed by draw (needs canvas coords)
+  particles: Particle[];
   dots: Dot[];
   signerIndex: Map<string, number>;
 };
@@ -44,6 +56,9 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
     blocks: [],
     lastTop: null,
     shift: 0,
+    seal: 0,
+    sealArm: false,
+    particles: [],
     dots: [],
     signerIndex: new Map(),
   });
@@ -52,9 +67,12 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
   useEffect(() => {
     const st = stateRef.current;
     const newest = blocks[0]?.height ?? null;
-    // Never arm the slide in static mode — it can only decay via draw calls,
-    // and at static cadence it would sit mid-slide forever.
-    if (!FX_OFF && newest != null && st.lastTop != null && newest > st.lastTop) st.shift = 1;
+    // Never arm the slide/burst in static mode — they can only decay via
+    // draw calls, and at static cadence they would sit mid-flight forever.
+    if (!FX_OFF && newest != null && st.lastTop != null && newest > st.lastTop) {
+      st.shift = 1;
+      st.sealArm = true;
+    }
     if (newest != null) st.lastTop = newest;
     st.blocks = blocks;
 
@@ -62,7 +80,7 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
     for (const b of blocks) {
       const v = (b.validator || '').toLowerCase();
       if (v && !st.signerIndex.has(v)) {
-        st.signerIndex.set(v, st.signerIndex.size % SIGNER_COLORS.length);
+        st.signerIndex.set(v, st.signerIndex.size);
         newSigner = true;
       }
     }
@@ -118,9 +136,18 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
       ctx.closePath();
     };
 
+    const ring = (x: number, y: number, r: number, style: string, width: number) => {
+      ctx.strokeStyle = style;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+    };
+
     const draw = (t: number) => {
-      // Animation dt (clamped — dots shouldn't teleport after a long gap);
-      // slide decay uses wall-clock dt so infrequent draws still settle it.
+      // Animation dt (clamped — dots/particles shouldn't teleport after a
+      // long gap); slide/burst decay uses wall-clock dt so infrequent draws
+      // still settle them.
       const rawDt = lastT ? (t - lastT) / 1000 : 0.016;
       const dt = Math.min(0.05, rawDt);
       const wallDt = Math.min(0.5, rawDt);
@@ -131,7 +158,8 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
       const baseline = H * 0.42;
       const marginL = 16;
       const marginR = 16;
-      const incomingX = W - marginR - BLOCK_SIZE - 26;
+      const incomingX = W - marginR - INCOMING_SIZE - 26;
+      const sealX = incomingX + INCOMING_SIZE / 2;
 
       // faint vertical grid
       ctx.strokeStyle = 'rgba(255,255,255,0.025)';
@@ -144,16 +172,36 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
       }
 
       // chain baseline
-      ctx.strokeStyle = 'rgba(34,211,238,0.16)';
+      ctx.strokeStyle = `rgba(${CYAN},0.16)`;
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(marginL, baseline);
-      ctx.lineTo(incomingX + BLOCK_SIZE / 2, baseline);
+      ctx.lineTo(sealX, baseline);
       ctx.stroke();
 
       // decay the new-block slide (never armed in FX_OFF mode)
       if (st.shift > 0) st.shift = Math.max(0, st.shift - wallDt * 3.2);
       const ease = st.shift * st.shift * (3 - 2 * st.shift); // smoothstep
       const shiftPx = ease * SLOT;
+
+      // consume the seal trigger BEFORE the block loop so the white-hot
+      // flash appears on the very frame the block arrives
+      if (st.sealArm) {
+        st.sealArm = false;
+        st.seal = 1;
+        st.particles = [];
+        for (let i = 0; i < 14; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const v = 26 + Math.random() * 55;
+          st.particles.push({
+            x: sealX,
+            y: baseline,
+            vx: Math.cos(a) * v,
+            vy: Math.sin(a) * v * 0.7,
+            gold: i % 2 === 0,
+          });
+        }
+      }
 
       // ambient tx dots flowing toward the incoming slot
       const lineLen = incomingX - marginL;
@@ -168,7 +216,7 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
         const wob = Math.sin(d.p * Math.PI * 3 + d.lane * 5) * 4 * d.lane;
         const dy = baseline + wob;
         const near = Math.min(1, (1 - d.p) * 6); // fade as they merge into incoming
-        const col = d.hue < 0.55 ? '34,211,238' : '240,185,11';
+        const col = d.hue < 0.55 ? CYAN : GOLD;
         ctx.fillStyle = `rgba(${col},${0.25 + 0.45 * near})`;
         ctx.beginPath();
         ctx.arc(dx, dy, 1.7, 0, Math.PI * 2);
@@ -185,69 +233,122 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
       list.forEach((b, i) => {
         const cx = incomingX - (i + 1) * SLOT + shiftPx;
         if (cx < marginL - SLOT / 2) return;
-        const x = cx - BLOCK_SIZE / 2;
-        const y = baseline - BLOCK_SIZE / 2;
-        const v = (b.validator || '').toLowerCase();
-        const color = SIGNER_COLORS[st.signerIndex.get(v) ?? 0] || SIGNER_COLORS[0];
+        const s = sizeFor(b);
+        const x = cx - s / 2;
+        const y = baseline - s / 2;
         const isNewest = i === 0;
 
         // connector node on the baseline between blocks
-        ctx.fillStyle = 'rgba(34,211,238,0.5)';
+        ctx.fillStyle = `rgba(${CYAN},0.5)`;
         ctx.beginPath();
         ctx.arc(cx + SLOT / 2, baseline, 2, 0, Math.PI * 2);
         ctx.fill();
 
+        // Uniform dim gold for settled blocks; cyan for the newest one.
+        const strokeStyle = isNewest ? `rgba(${CYAN},1)` : `rgba(${GOLD},0.38)`;
+        const haloStyle = isNewest ? `rgba(${CYAN},0.25)` : `rgba(${GOLD},0.10)`;
+
         // halo (double stroke — cheaper than shadowBlur)
-        roundRect(x - 1.5, y - 1.5, BLOCK_SIZE + 3, BLOCK_SIZE + 3, 8);
-        ctx.strokeStyle = `${color}30`;
+        roundRect(x - 1.5, y - 1.5, s + 3, s + 3, 8);
+        ctx.strokeStyle = haloStyle;
         ctx.lineWidth = 3;
         ctx.stroke();
 
-        roundRect(x, y, BLOCK_SIZE, BLOCK_SIZE, 7);
+        roundRect(x, y, s, s, 7);
         ctx.fillStyle = isNewest ? 'rgba(23,27,33,0.98)' : 'rgba(18,21,26,0.95)';
         ctx.fill();
-        ctx.strokeStyle = color;
+        ctx.strokeStyle = strokeStyle;
         ctx.lineWidth = 1;
         ctx.stroke();
 
+        // white-hot flash on the newest block, cooling to cyan as the seal
+        // burst decays
+        if (isNewest && st.seal > 0) {
+          roundRect(x - 3, y - 3, s + 6, s + 6, 9);
+          ctx.strokeStyle = `rgba(${CYAN},${0.35 * st.seal})`;
+          ctx.lineWidth = 4;
+          ctx.stroke();
+          roundRect(x, y, s, s, 7);
+          ctx.strokeStyle = `rgba(255,255,255,${0.75 * st.seal})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+
         // tx count inside (or a dim idle dot)
         if (b.txCount > 0) {
-          ctx.fillStyle = color;
+          ctx.fillStyle = isNewest ? `rgba(${CYAN},0.95)` : `rgba(${GOLD},0.8)`;
           ctx.font = 'bold 11px "JetBrains Mono", monospace';
           ctx.fillText(String(b.txCount), cx, baseline + 4);
           ctx.font = '9px "JetBrains Mono", monospace';
         } else {
-          ctx.fillStyle = `${color}55`;
+          ctx.fillStyle = isNewest ? `rgba(${CYAN},0.5)` : `rgba(${GOLD},0.3)`;
           ctx.beginPath();
           ctx.arc(cx, baseline, 2.2, 0, Math.PI * 2);
           ctx.fill();
         }
 
-        // height label (newest label fades in as the block settles into place)
+        // height label (newest fades in as the block settles). Pinned to a
+        // common baseline so different-sized nodes don't make the row ragged.
         const labelAlpha = isNewest ? Math.max(0, 1 - ease * 1.6) : 1;
         ctx.fillStyle = isNewest
-          ? `rgba(232,234,238,${0.85 * labelAlpha})`
+          ? `rgba(${CYAN},${0.9 * labelAlpha})`
           : 'rgba(110,118,131,0.9)';
-        ctx.fillText(`#${b.height}`, cx, baseline + BLOCK_SIZE / 2 + 16);
+        ctx.fillText(`#${b.height}`, cx, baseline + (BASE_SIZE + MAX_EXTRA) / 2 + 14);
       });
+
+      // ---- seal burst (rings/particles/wave overlay the blocks) ----
+      if (st.seal > 0) {
+        const sp = st.seal;
+
+        // ripple rings expanding from the seal point
+        ring(sealX, baseline, 8 + (1 - sp) * 40, `rgba(${CYAN},${0.5 * sp})`, 1.5);
+        ring(sealX, baseline, 4 + (1 - sp) * 62, `rgba(${GOLD},${0.3 * sp})`, 1);
+
+        // particle burst
+        for (const p of st.particles) {
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vx *= 0.985;
+          p.vy *= 0.985;
+          ctx.fillStyle = `rgba(${p.gold ? GOLD : CYAN},${0.85 * sp})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // energy wave running left along the chain line as the block locks in
+        const wx = marginL + (sealX - marginL) * sp;
+        const wave = ctx.createLinearGradient(wx - 45, 0, wx + 45, 0);
+        wave.addColorStop(0, `rgba(${CYAN},0)`);
+        wave.addColorStop(0.5, `rgba(${CYAN},${0.65 * sp})`);
+        wave.addColorStop(1, `rgba(${CYAN},0)`);
+        ctx.strokeStyle = wave;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.max(marginL, wx - 45), baseline);
+        ctx.lineTo(Math.min(sealX, wx + 45), baseline);
+        ctx.stroke();
+
+        st.seal = Math.max(0, st.seal - wallDt * 1.25);
+      }
 
       // incoming slot — fades out while a freshly sealed block passes over it
       const handoff = Math.max(0, 1 - ease * 2.2);
       const pulse = (FX_OFF ? 0.6 : 0.45 + 0.35 * Math.sin(t / 320)) * handoff;
       const ix = incomingX;
-      const iy = baseline - BLOCK_SIZE / 2;
+      const iy = baseline - INCOMING_SIZE / 2;
       ctx.setLineDash([4, 4]);
-      roundRect(ix, iy, BLOCK_SIZE, BLOCK_SIZE, 7);
-      ctx.strokeStyle = `rgba(240,185,11,${pulse})`;
+      roundRect(ix, iy, INCOMING_SIZE, INCOMING_SIZE, 7);
+      ctx.strokeStyle = `rgba(${GOLD},${pulse})`;
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = `rgba(240,185,11,${pulse * 0.9})`;
+      ctx.fillStyle = `rgba(${GOLD},${pulse * 0.9})`;
       ctx.beginPath();
-      ctx.arc(ix + BLOCK_SIZE / 2, baseline, 2.4, 0, Math.PI * 2);
+      ctx.arc(ix + INCOMING_SIZE / 2, baseline, 2.4, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = `rgba(240,185,11,${0.6 * handoff})`;
-      ctx.fillText('incoming', ix + BLOCK_SIZE / 2, baseline + BLOCK_SIZE / 2 + 16);
+      ctx.fillStyle = `rgba(${GOLD},${0.6 * handoff})`;
+      ctx.fillText('incoming', ix + INCOMING_SIZE / 2, baseline + (BASE_SIZE + MAX_EXTRA) / 2 + 14);
 
       // edge fade into the panel background
       const fade = ctx.createLinearGradient(0, 0, EDGE_FADE, 0);
@@ -274,25 +375,32 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
       cancelAnimationFrame(raf);
     };
 
-    drawRef.current = () => draw(performance.now());
+    // ResizeObserver callbacks ride the rendering pipeline and never fire in
+    // hidden/throttled tabs, and mount-time layout can report width 0 there —
+    // so every out-of-band draw first re-checks the measured width.
+    drawRef.current = () => {
+      const cw = wrap.clientWidth;
+      if (cw > 0 && cw !== W) resize();
+      draw(performance.now());
+    };
     resize();
 
     if (FX_OFF) {
       // static render, refreshed only when data changes (cheap 1s cadence)
-      draw(performance.now());
-      const id = window.setInterval(() => draw(performance.now()), 1000);
-      const ro = new ResizeObserver(() => { resize(); draw(performance.now()); });
+      drawRef.current();
+      const id = window.setInterval(() => drawRef.current?.(), 1000);
+      const ro = new ResizeObserver(() => drawRef.current?.());
       ro.observe(wrap);
       return () => { window.clearInterval(id); ro.disconnect(); drawRef.current = null; };
     }
 
     // One synchronous frame so the panel is never blank even if rAF is
     // throttled (background tab) before the loop gets going.
-    draw(performance.now());
+    drawRef.current();
     start();
     const onVis = () => (document.hidden ? stop() : start());
     document.addEventListener('visibilitychange', onVis);
-    const ro = new ResizeObserver(() => { resize(); draw(performance.now()); });
+    const ro = new ResizeObserver(() => drawRef.current?.());
     ro.observe(wrap);
     return () => {
       stop();
@@ -302,13 +410,13 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
     };
   }, []);
 
-  // Signer legend (first-seen order, matches canvas colors). legendVersion
-  // bumps whenever a new signer is recorded, so this stays in sync.
+  // Signer legend (first-seen order). Colors no longer encode signers on the
+  // canvas — the legend simply lists the active validators.
   void legendVersion;
-  const seen: { addr: string; color: string }[] = [];
-  for (const [addr, i] of stateRef.current.signerIndex) {
+  const seen: string[] = [];
+  for (const [addr] of stateRef.current.signerIndex) {
     if (seen.length >= LEGEND_MAX) break;
-    seen.push({ addr, color: SIGNER_COLORS[i] || SIGNER_COLORS[0] });
+    seen.push(addr);
   }
 
   return (
@@ -320,15 +428,16 @@ export default function ChainPulse({ blocks }: { blocks: PulseBlock[] }) {
             <LivePill label="" />
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            {seen.map((s) => (
+            <span className="text-[10px] font-mono text-txt-3/70">signers</span>
+            {seen.map((addr) => (
               <button
-                key={s.addr}
-                onClick={() => navigateTo(`/address/${s.addr}`)}
-                title={s.addr}
+                key={addr}
+                onClick={() => navigateTo(`/address/${addr}`)}
+                title={addr}
                 className="inline-flex items-center gap-1.5 text-[10px] font-mono text-txt-3 hover:text-txt transition-colors"
               >
-                <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: s.color }} />
-                {shortAddr(s.addr)}
+                <span className="w-1.5 h-1.5 rounded-full inline-block bg-gold/60" />
+                {shortAddr(addr)}
               </button>
             ))}
           </div>
