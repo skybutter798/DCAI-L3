@@ -9,6 +9,14 @@ export const NODE_RPC = '/noderpc/';
 export const CHAIN_ID = 18441;
 export const NATIVE_SYMBOL = 'tDCAI';
 
+// Low-power / reduced-motion switch, latched ONCE at page load so SPA
+// navigation (which drops the query string) cannot silently disarm it.
+export const FX_OFF =
+  typeof window !== 'undefined' &&
+  (window.location.search.includes('fx=off') ||
+    (typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches));
+
 // Blockscout API v2 GET. Returns parsed JSON or null (on 429/network errors).
 export async function bs(path: string): Promise<any | null> {
   try {
@@ -49,6 +57,9 @@ export async function rpcBlockNumber(): Promise<number | null> {
 // signer comes from clique_getSnapshot(height).recents. Resolved values are
 // cached for the session since historical signers never change.
 const signerCache: Record<number, string> = {};
+
+// Synchronous fast-path for list rebuilds (async resolution fills the cache).
+export const getCachedSigner = (h: number): string => signerCache[h] || '';
 
 export async function resolveCliqueSigners(heights: number[]): Promise<Record<number, string>> {
   const out: Record<number, string> = {};

@@ -37,7 +37,8 @@ const lazyView = (load: () => Promise<{ default: any }>) =>
 
 const ContributorProgram = lazyView(() => import('./ContributorProgram'));
 const DashboardView = lazyView(() => import('./views/DashboardView'));
-import { bs, rpc, rpcBlockNumber, resolveCliqueSigners, navigateTo, CHAIN_ID, NATIVE_SYMBOL, adminApiBase, publicBase } from './lib/api';
+import { bs, rpc, rpcBlockNumber, resolveCliqueSigners, getCachedSigner, navigateTo, CHAIN_ID, NATIVE_SYMBOL, publicBase, FX_OFF } from './lib/api';
+import ChainPulse from './components/ChainPulse';
 import { short, shortAddr, fmtWei, fmtUnits, fmtNum, timeAgo, fmtStamp, gasPct } from './lib/format';
 import {
   Card, CardHead, Page, PageTitle, Badge, StatusBadge, LivePill, Btn, CopyBtn, LinkText,
@@ -128,7 +129,7 @@ const Header = ({ active }: { active: ViewKey }) => {
             <Cpu className="w-4 h-4 text-ink-950" />
           </div>
           <span className="font-bold text-[15px] tracking-tight text-txt">
-            DCAI <span className="text-gold">L3</span>
+            DCAI <span className="text-gold glow-gold-text">L3</span>
           </span>
           <Badge tone="cyan" className="hidden sm:inline-flex">testnet</Badge>
         </div>
@@ -192,6 +193,7 @@ const Header = ({ active }: { active: ViewKey }) => {
           </motion.div>
         ) : null}
       </AnimatePresence>
+      <div className="keyline" />
     </header>
   );
 };
@@ -421,18 +423,22 @@ const HomeView = ({
   <Page>
     <div className="mb-5 flex flex-wrap items-end justify-between gap-2">
       <div>
-        <h1 className="text-xl font-bold tracking-tight text-txt">DCAI L3 Explorer</h1>
-        <div className="mt-1 text-[12px] text-txt-2 font-mono">
+        <h1 className="text-xl font-bold tracking-tight text-txt">
+          DCAI <span className="text-cyan glow-cyan-text">L3</span> Explorer
+        </h1>
+        <div className="mt-1 text-[12px] text-txt-2 font-mono cursor-blink">
           chainId {CHAIN_ID} · {NATIVE_SYMBOL} · Clique PoA · ~2s blocks
         </div>
       </div>
       <div className="text-[11px] font-mono text-txt-3">AuraScan</div>
     </div>
 
+    <ChainPulse blocks={blocks} />
+
     <Stats />
 
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Card>
+      <Card className="hud-corners">
         <CardHead
           title="Latest blocks"
           meta={<LivePill />}
@@ -472,7 +478,7 @@ const HomeView = ({
         </Table>
       </Card>
 
-      <Card>
+      <Card className="hud-corners">
         <CardHead
           title="Latest transactions"
           meta={<LivePill />}
@@ -2326,8 +2332,6 @@ export default function App() {
   const [txs, setTxs] = useState<any[]>([]);
 
   const cliqueRecentsRef = useRef<Record<string, string>>({});
-  const signerByHeightRef = useRef<Record<number, string>>({});
-  const signerInflightRef = useRef<Set<number>>(new Set());
   const latestHeightRef = useRef<number | null>(null);
   const seenTxRef = useRef<Set<string>>(new Set());
 
@@ -2354,7 +2358,7 @@ export default function App() {
 
         const items = apiItems.map((b: any) => {
           const height = Number(b.height);
-          const signer = (signerByHeightRef.current[height] || recents[String(height)] || '').toLowerCase();
+          const signer = (getCachedSigner(height) || recents[String(height)] || '').toLowerCase();
           const rewardWei = b.transaction_fees ?? '0';
           return {
             height,
@@ -2381,49 +2385,24 @@ export default function App() {
 
           setBlocks(items);
 
-          const missingHeights = Array.from(
-            new Set<number>(
-              items
-                .map((x: any) => Number(x.height))
-                .filter(
-                  (h: number) =>
-                    Number.isFinite(h) &&
-                    !signerByHeightRef.current[h] &&
-                    !(recents[String(h)] || '').toLowerCase()
-                )
-            )
-          ).slice(0, 10);
+          // Fill in signers outside the "recents" window via the shared
+          // cached resolver (same one the Blocks page uses).
+          const missingHeights = items
+            .filter((x: any) => !x.validator)
+            .map((x: any) => Number(x.height))
+            .filter((h: number) => Number.isFinite(h));
 
-          const toFetch = missingHeights.filter((h) => !signerInflightRef.current.has(h));
-          toFetch.forEach((h) => signerInflightRef.current.add(h));
-
-          if (toFetch.length) {
-            (async () => {
-              const updates: Record<number, string> = {};
-              for (const h of toFetch) {
-                try {
-                  const hex = '0x' + h.toString(16);
-                  const snap = await rpc('clique_getSnapshot', [hex]);
-                  const signer = String(snap?.recents?.[String(h)] || '').toLowerCase();
-                  if (signer) updates[h] = signer;
-                } catch {
-                } finally {
-                  signerInflightRef.current.delete(h);
-                }
-              }
-              const ks = Object.keys(updates);
-              if (!ks.length) return;
-              for (const k of ks) signerByHeightRef.current[Number(k)] = updates[Number(k)];
-              if (!cancelled) {
-                setBlocks((prev) =>
-                  (prev || []).map((b: any) => {
-                    const s = updates[Number(b.height)];
-                    if (!s) return b;
-                    return { ...b, validator: s, miner: shortAddr(s) };
-                  })
-                );
-              }
-            })();
+          if (missingHeights.length) {
+            resolveCliqueSigners(missingHeights).then((updates) => {
+              if (cancelled || !Object.keys(updates).length) return;
+              setBlocks((prev) =>
+                (prev || []).map((b: any) => {
+                  const s = updates[Number(b.height)];
+                  if (!s) return b;
+                  return { ...b, validator: s, miner: shortAddr(s) };
+                })
+              );
+            });
           }
         }
       } catch {}
@@ -2509,8 +2488,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-ink-950 text-txt font-sans relative overflow-x-hidden">
+    <div className={`min-h-screen bg-ink-950 text-txt font-sans relative overflow-x-hidden ${FX_OFF ? 'fx-off' : ''}`}>
       <div className="brand-wash" />
+      {currentView === 'home' ? <div className="cyber-grid" aria-hidden="true" /> : null}
 
       <Header active={currentView} />
       <SearchBar />
@@ -2570,7 +2550,7 @@ export default function App() {
         )}
       </>
 
-      <footer className="border-t border-line mt-14 relative z-10 bg-ink-900/60">
+      <footer className="border-t border-line mt-14 relative z-10 bg-ink-900">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
             <div className="flex items-center gap-2">
