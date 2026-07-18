@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { motion } from 'motion/react';
 import { ethers } from 'ethers';
-import { CheckCircle2, Code2, Globe, ShieldCheck, Wallet } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
+import { adminApiBase, publicBase, NATIVE_SYMBOL } from './lib/api';
+import { fmtNum, shortAddr } from './lib/format';
+import { Card, CardHead, Page, PageTitle, Badge, Btn, CopyBtn, Notice } from './components/ui';
 
 const STAKE_CONTRACT = '0x54ff6c64f1f7915a3aD54743aDd92b32412B06BC';
 const OPERATOR_REGISTRY = '0xb37c81eBC4b1B4bdD5476fe182D6C72133F41db9';
@@ -47,44 +49,16 @@ type RevealedKey = {
   usage?: any;
 };
 
-async function copyToClipboard(text: string) {
-  try {
-    if (navigator.clipboard && (window as any).isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
-}
+const PROGRAM_STEPS = [
+  'Connect wallet and choose a contributor role',
+  'Stake tDCAI according to the contributor lane you want',
+  'Submit infra details for review',
+  'Receive approval and contributor credential',
+  'Contribute uptime / RPC / indexing capacity',
+  'Check published epochs and claim rewards',
+];
 
 export default function ContributorProgram() {
-  const apiBase = (() => {
-    try {
-      return `${window.location.protocol}//${window.location.hostname}/admin/api`;
-    } catch {
-      return 'http://139.180.140.143/admin/api';
-    }
-  })();
-
-  const publicBase = (() => {
-    try {
-      return `${window.location.protocol}//${window.location.hostname}`;
-    } catch {
-      return 'http://139.180.140.143';
-    }
-  })();
-
   const [addr, setAddr] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
   const [stake, setStake] = useState<StakeState>(null);
@@ -97,7 +71,6 @@ export default function ContributorProgram() {
   const [note, setNote] = useState('');
   const [lastReq, setLastReq] = useState<any>(null);
   const [revealedKeys, setRevealedKeys] = useState<RevealedKey[] | null>(null);
-  const [copyToast, setCopyToast] = useState<string | null>(null);
   const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
 
   const selectedTier = contributorTiers[tier];
@@ -144,11 +117,6 @@ export default function ContributorProgram() {
   }, [role, tier, selectedTier.internalTier, region, endpoint, note]);
 
   const roleLabel = role === 'indexer' ? 'Indexer' : 'RPC Provider';
-
-  const showToast = (text: string) => {
-    setCopyToast(text);
-    window.setTimeout(() => setCopyToast(null), 1200);
-  };
 
   const connect = async () => {
     setErr(null);
@@ -211,11 +179,7 @@ export default function ContributorProgram() {
       setBusy('Sending contributor stake tx…');
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner();
-      const c = new ethers.Contract(
-        STAKE_CONTRACT,
-        ['function stake(uint8 tier) payable'],
-        signer
-      );
+      const c = new ethers.Contract(STAKE_CONTRACT, ['function stake(uint8 tier) payable'], signer);
       const tierEnum = selectedTier.internalTier === 'basic' ? 1 : selectedTier.internalTier === 'pro' ? 2 : 3;
       const value = ethers.parseEther(selectedTier.stake);
       const tx = await c.stake(tierEnum, { value });
@@ -277,7 +241,7 @@ export default function ContributorProgram() {
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner();
 
-      const nonceRes = await fetch(`${apiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
+      const nonceRes = await fetch(`${adminApiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
       const nonceJson = await nonceRes.json();
       const nonce = nonceJson?.nonce;
       if (!nonce) throw new Error('Failed to get nonce');
@@ -286,7 +250,7 @@ export default function ContributorProgram() {
       const message = `DCAI API Key Request\nAddress: ${addr}\nTier: ${internalTier}\nNonce: ${nonce}`;
       const signature = await signer.signMessage(message);
 
-      const res = await fetch(`${apiBase}/apikey/request`, {
+      const res = await fetch(`${adminApiBase}/apikey/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -315,7 +279,7 @@ export default function ContributorProgram() {
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner();
 
-      const nonceRes = await fetch(`${apiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
+      const nonceRes = await fetch(`${adminApiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
       const nonceJson = await nonceRes.json();
       const nonce = nonceJson?.nonce;
       if (!nonce) throw new Error('Failed to get nonce');
@@ -323,7 +287,7 @@ export default function ContributorProgram() {
       const message = `DCAI API Key Reveal\nAddress: ${addr}\nNonce: ${nonce}`;
       const signature = await signer.signMessage(message);
 
-      const res = await fetch(`${apiBase}/apikey/reveal`, {
+      const res = await fetch(`${adminApiBase}/apikey/reveal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: addr, signature }),
@@ -339,293 +303,232 @@ export default function ContributorProgram() {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
-    >
-      {copyToast ? (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 10 }}
-          className="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-lg bg-dark-900/80 border border-cyan-500/30 backdrop-blur-md text-xs font-mono text-cyan-300 shadow-[0_0_20px_rgba(0,240,255,0.15)]"
-        >
-          {copyToast}
-        </motion.div>
-      ) : null}
+    <Page>
+      <PageTitle
+        title="Contributor"
+        accent="Program"
+        sub="Run infrastructure for DCAI L3 as an official contributor: stake → apply → approval → credentials → contribute → claim rewards."
+      />
 
-      <div className="mb-6 flex items-center gap-4">
-        <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/20 shadow-[0_0_20px_rgba(0,240,255,0.10)]">
-          <ShieldCheck className="w-8 h-8 text-cyan-400" />
-        </div>
-        <div className="min-w-0">
-          <h1 className="text-3xl md:text-4xl font-black tracking-widest">ECOSYSTEM <span className="glow-text-cyan text-cyan-300">CONTRIBUTOR</span></h1>
-          <div className="mt-2 text-xs font-mono text-gold-500/60">Apply as an official DCAI L3 contributor: stake → submit → admin approval → receive credentials → contribute → claim rewards</div>
-        </div>
-      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4 mb-4">
+        <Card>
+          <CardHead
+            title="Wallet & stake"
+            actions={
+              <div className="flex gap-1.5">
+                <Btn tone="primary" onClick={connect}>{addr ? 'Reconnect' : 'Connect wallet'}</Btn>
+                <Btn disabled={!addr} onClick={refreshStake}>Refresh</Btn>
+              </div>
+            }
+          />
+          <div className="px-4 py-3">
+            <div className="text-[12px] font-mono text-txt break-all">{addr || 'Not connected'}</div>
+            <div className="mt-1 text-[11px] font-mono text-txt-3">
+              chainId {chainId ?? '--'} · stake contract {shortAddr(STAKE_CONTRACT)}
+              <CopyBtn value={STAKE_CONTRACT} label="stake contract" />
+            </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-6 mb-8">
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-xs font-mono text-gold-500/50">WALLET</div>
-              <div className="mt-1 text-sm font-mono text-cyan-200/90 break-all">{addr || '-- not connected --'}</div>
-              <div className="mt-1 text-[10px] font-mono text-gold-500/40">chainId {chainId ?? '--'} · stake contract {STAKE_CONTRACT}</div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={connect} className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">CONNECT</button>
-              <button disabled={!addr} onClick={refreshStake} className={`px-3 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-gold-500/20 text-gold-500/80 hover:border-cyan-500/40 hover:text-cyan-300' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>REFRESH</button>
-            </div>
-          </div>
+            {err ? <Notice tone="bad">{err}</Notice> : null}
+            {busy ? <Notice tone="neutral">{busy}</Notice> : null}
 
-          {err ? <div className="mt-3 text-[11px] font-mono text-rose-300">{err}</div> : null}
-          {busy ? <div className="mt-3 text-[11px] font-mono text-gold-500/60">{busy}</div> : null}
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="rounded-lg border border-line bg-ink-900 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-txt-3">Current stake</div>
+                <div className="mt-1 text-[14px] font-mono text-gold tnum">{stakeAmount} {NATIVE_SYMBOL}</div>
+                <div className="mt-0.5 text-[10px] font-mono text-txt-3">internal tier {stakeTierLabel}</div>
+              </div>
+              <div className="rounded-lg border border-line bg-ink-900 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-txt-3">Unstake status</div>
+                <div className="mt-1 text-[14px] font-mono text-txt">{requestedAtSec > 0 ? 'requested' : 'idle'}</div>
+                <div className="mt-0.5 text-[10px] font-mono text-txt-3">cooldown 24h</div>
+              </div>
+              <div className="rounded-lg border border-line bg-ink-900 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-txt-3">Withdraw</div>
+                <div className="mt-1 text-[14px] font-mono text-txt">
+                  {requestedAtSec > 0 ? (cooldownLeftSec <= 0 ? 'available now' : `in ${Math.max(0, cooldownLeftSec)}s`) : '--'}
+                </div>
+                <div className="mt-0.5 text-[10px] font-mono text-txt-3">credential tied to stake</div>
+              </div>
+            </div>
 
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/40 p-4">
-              <div className="text-[10px] font-mono text-gold-500/45">CURRENT STAKE</div>
-              <div className="mt-1 text-sm font-mono text-cyan-300">{stakeAmount} tDCAI</div>
-              <div className="mt-1 text-[10px] font-mono text-gold-500/45">internal tier {stakeTierLabel}</div>
-            </div>
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/40 p-4">
-              <div className="text-[10px] font-mono text-gold-500/45">UNSTAKE STATUS</div>
-              <div className="mt-1 text-sm font-mono text-cyan-300">{requestedAtSec > 0 ? 'requested' : 'idle'}</div>
-              <div className="mt-1 text-[10px] font-mono text-gold-500/45">cooldown 24h</div>
-            </div>
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/40 p-4">
-              <div className="text-[10px] font-mono text-gold-500/45">WITHDRAW</div>
-              <div className="mt-1 text-sm font-mono text-cyan-300">{requestedAtSec > 0 ? (cooldownLeftSec <= 0 ? 'available now' : `in ${Math.max(0, cooldownLeftSec)}s`) : '--'}</div>
-              <div className="mt-1 text-[10px] font-mono text-gold-500/45">revoke policy can be tied to stake</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Btn tone="primary" disabled={!addr} onClick={doStake}>Stake {fmtNum(selectedTier.stake)} {NATIVE_SYMBOL} ({selectedTier.label})</Btn>
+              <Btn tone="danger" disabled={!addr || stakeTierLabel === 'none' || requestedAtSec > 0} onClick={requestUnstake}>Request unstake</Btn>
+              <Btn tone="ok" disabled={!addr || requestedAtSec <= 0 || cooldownLeftSec > 0} onClick={withdrawStake}>Withdraw</Btn>
             </div>
           </div>
+        </Card>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              disabled={!addr}
-              onClick={doStake}
-              className={`px-3 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-cyan-500/20 text-cyan-300 hover:border-cyan-400/60' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}
-            >
-              STAKE SELECTED CONTRIBUTOR TIER
-            </button>
-            <button
-              disabled={!addr || stakeTierLabel === 'none' || requestedAtSec > 0}
-              onClick={requestUnstake}
-              className={`px-3 py-2 rounded-lg border text-xs font-mono ${(!addr || stakeTierLabel === 'none' || requestedAtSec > 0) ? 'border-gold-500/10 text-gold-500/30 cursor-not-allowed' : 'border-rose-500/30 text-rose-300 hover:border-rose-400/70'}`}
-            >
-              REQUEST UNSTAKE
-            </button>
-            <button
-              disabled={!addr || requestedAtSec <= 0 || cooldownLeftSec > 0}
-              onClick={withdrawStake}
-              className={`px-3 py-2 rounded-lg border text-xs font-mono ${(!addr || requestedAtSec <= 0 || cooldownLeftSec > 0) ? 'border-gold-500/10 text-gold-500/30 cursor-not-allowed' : 'border-emerald-500/30 text-emerald-300 hover:border-emerald-400/70'}`}
-            >
-              WITHDRAW
-            </button>
-          </div>
-        </div>
-
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-          <div className="text-xs font-mono text-gold-500/50">PROGRAM FLOW</div>
-          <div className="mt-4 space-y-3">
-            {[
-              'Connect wallet and choose a contributor role',
-              'Stake tDCAI according to the contributor lane you want',
-              'Submit infra details for review',
-              'Receive approval and contributor credential',
-              'Contribute uptime / RPC / indexing capacity',
-              'Check published epochs and claim rewards',
-            ].map((step) => (
-              <div key={step} className="flex items-start gap-3 rounded-xl border border-gold-500/10 bg-dark-900/40 p-3">
-                <CheckCircle2 className="w-4 h-4 mt-0.5 text-cyan-400 shrink-0" />
-                <div className="text-xs font-mono text-gold-500/75">{step}</div>
+        <Card>
+          <CardHead title="Program flow" />
+          <div className="px-4 py-3 space-y-2">
+            {PROGRAM_STEPS.map((step, i) => (
+              <div key={step} className="flex items-start gap-2.5">
+                <span className="shrink-0 w-5 h-5 rounded-full border border-gold/40 text-gold text-[10px] font-mono inline-flex items-center justify-center mt-0.5">{i + 1}</span>
+                <div className="text-[12px] text-txt-2 leading-5">{step}</div>
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-6 mb-8">
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-          <div className="text-xs font-mono text-gold-500/50">CHOOSE ROLE</div>
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-            {[
-              { key: 'indexer', label: 'Indexer', desc: 'Index blocks, logs, contracts, and ecosystem data.' },
-              { key: 'rpc-provider', label: 'RPC Provider', desc: 'Serve dependable RPC capacity to the network.' },
-            ].map((item) => (
-              <button
-                key={item.key}
-                onClick={() => setRole(item.key as ContributorRole)}
-                className={`text-left rounded-xl border p-4 transition-colors ${role === item.key ? 'border-cyan-400/60 bg-cyan-500/10' : 'border-gold-500/10 bg-dark-900/40 hover:border-cyan-500/30'}`}
-              >
-                <div className="text-sm font-mono text-cyan-300">{item.label}</div>
-                <div className="mt-2 text-[11px] font-mono text-gold-500/60">{item.desc}</div>
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-6 text-xs font-mono text-gold-500/50">CHOOSE CONTRIBUTOR LANE</div>
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-            {(Object.keys(contributorTiers) as ContributorTierKey[]).map((key) => {
-              const item = contributorTiers[key];
-              return (
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+        <Card>
+          <CardHead title="Choose role & lane" />
+          <div className="px-4 py-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {[
+                { key: 'indexer', label: 'Indexer', desc: 'Index blocks, logs, contracts, and ecosystem data.' },
+                { key: 'rpc-provider', label: 'RPC Provider', desc: 'Serve dependable RPC capacity to the network.' },
+              ].map((item) => (
                 <button
-                  key={key}
-                  onClick={() => setTier(key)}
-                  className={`text-left rounded-2xl border p-4 transition-colors ${tier === key ? 'border-cyan-400/60 bg-cyan-500/10' : 'border-gold-500/10 bg-dark-900/40 hover:border-cyan-500/30'}`}
+                  key={item.key}
+                  onClick={() => setRole(item.key as ContributorRole)}
+                  className={`text-left rounded-lg border p-3 transition-colors ${
+                    role === item.key ? 'border-gold/50 bg-gold/5' : 'border-line bg-ink-900 hover:border-line-2'
+                  }`}
                 >
-                  <div className="text-xs font-mono text-gold-500/50">{item.label.toUpperCase()}</div>
-                  <div className="mt-2 text-lg font-mono text-cyan-200/90">Stake {item.stake} tDCAI</div>
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/45">{item.roleHint}</div>
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/45">{item.throughput}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-          <div className="text-xs font-mono text-gold-500/50">SUBMIT CONTRIBUTOR APPLICATION</div>
-          <div className="mt-2 text-xs font-mono text-gold-500/60">This is separate from the public app/developer API plans. It is for official ecosystem contributors.</div>
-
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <div className="text-[10px] font-mono text-gold-500/45 mb-2">ROLE</div>
-              <div className="rounded-xl border border-gold-500/10 bg-dark-900/40 px-3 py-3 text-xs font-mono text-cyan-300">{roleLabel}</div>
-            </div>
-            <div>
-              <div className="text-[10px] font-mono text-gold-500/45 mb-2">CONTRIBUTOR LANE</div>
-              <div className="rounded-xl border border-gold-500/10 bg-dark-900/40 px-3 py-3 text-xs font-mono text-cyan-300">{selectedTier.label} · internal {selectedTier.internalTier}</div>
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-              placeholder="Region / location (e.g. SG / MY / JP)"
-              className="bg-dark-900/50 border border-gold-500/15 rounded-xl px-3 py-3 text-xs font-mono text-gold-500/80 outline-none"
-            />
-            <input
-              value={endpoint}
-              onChange={(e) => setEndpoint(e.target.value)}
-              placeholder="Endpoint / IP / domain"
-              className="bg-dark-900/50 border border-gold-500/15 rounded-xl px-3 py-3 text-xs font-mono text-gold-500/80 outline-none"
-            />
-          </div>
-
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Short infra note: uptime target, region coverage, hardware, or operator intro…"
-            className="mt-3 w-full min-h-[120px] bg-dark-900/50 border border-gold-500/15 rounded-xl p-3 text-xs font-mono text-gold-500/80 outline-none"
-          />
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              disabled={!addr}
-              onClick={requestContributorKey}
-              className={`px-4 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-cyan-500/20 text-cyan-300 hover:border-cyan-400/60' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}
-            >
-              SUBMIT APPLICATION
-            </button>
-            <button
-              disabled={!addr}
-              onClick={revealMyKeys}
-              className={`px-4 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-gold-500/20 text-gold-500/80 hover:border-cyan-500/40 hover:text-cyan-300' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}
-            >
-              REVEAL MY CREDENTIALS
-            </button>
-          </div>
-
-          {lastReq ? (
-            <div className="mt-4 rounded-xl border border-gold-500/10 bg-dark-900/40 p-4">
-              <div className="text-[10px] font-mono text-gold-500/45">LATEST APPLICATION STATUS</div>
-              <pre className="mt-2 text-[10px] font-mono text-gold-500/70 whitespace-pre-wrap break-all">{JSON.stringify(lastReq, null, 2)}</pre>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-6 mb-8">
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <div className="text-xs font-mono text-gold-500/50">CONTRIBUTOR CREDENTIALS</div>
-              <div className="mt-1 text-[10px] font-mono text-gold-500/45">Once approved, contributors can use the shared RPC base with header auth.</div>
-            </div>
-            <div className="text-[10px] font-mono text-gold-500/45">Base RPC: {publicBase}/rpc/</div>
-          </div>
-
-          {revealedKeys && revealedKeys.length ? (
-            <div className="mt-4 space-y-3">
-              {revealedKeys.map((item, idx) => {
-                const tierPath = `${publicBase}/rpc/${String(item.tier)}/${String(item.key)}/`;
-                return (
-                  <div key={`${item.key}-${idx}`} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
-                    <div className="text-[10px] font-mono text-gold-500/45">active credential · internal tier {item.tier}</div>
-                    <div className="mt-2 text-sm font-mono text-cyan-300 break-all">{item.key}</div>
-                    <div className="mt-3 grid grid-cols-1 gap-3">
-                      <div>
-                        <div className="text-[10px] font-mono text-gold-500/45">HEADER AUTH</div>
-                        <div className="mt-1 text-[11px] font-mono text-gold-500/75 break-all">X-API-Key: {item.key}</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] font-mono text-gold-500/45">RPC BASE</div>
-                        <div className="mt-1 text-[11px] font-mono text-cyan-200/90 break-all">{publicBase}/rpc/</div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] font-mono text-gold-500/45">DIRECT TIER PATH</div>
-                        <div className="mt-1 text-[11px] font-mono text-cyan-200/90 break-all">{tierPath}</div>
-                      </div>
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button onClick={async () => { if (await copyToClipboard(item.key)) showToast('Copied API key'); }} className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-[10px] font-mono hover:border-cyan-400/60">COPY KEY</button>
-                      <button onClick={async () => { if (await copyToClipboard(`${publicBase}/rpc/`)) showToast('Copied RPC base'); }} className="px-3 py-2 rounded-lg border border-gold-500/20 text-gold-500/80 text-[10px] font-mono hover:border-cyan-500/40 hover:text-cyan-300">COPY RPC BASE</button>
-                    </div>
+                  <div className="text-[13px] font-semibold text-txt flex items-center gap-2">
+                    {item.label}
+                    {role === item.key ? <Badge tone="gold">selected</Badge> : null}
                   </div>
+                  <div className="mt-1 text-[11px] text-txt-3 leading-4">{item.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2.5">
+              {(Object.keys(contributorTiers) as ContributorTierKey[]).map((key) => {
+                const item = contributorTiers[key];
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setTier(key)}
+                    className={`text-left rounded-lg border p-3 transition-colors ${
+                      tier === key ? 'border-gold/50 bg-gold/5' : 'border-line bg-ink-900 hover:border-line-2'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] uppercase tracking-wider text-txt-3">{item.label}</div>
+                      {tier === key ? <Badge tone="gold">✓</Badge> : null}
+                    </div>
+                    <div className="mt-1 text-[15px] font-mono text-txt tnum">{fmtNum(item.stake)} <span className="text-[11px] text-txt-3">{NATIVE_SYMBOL}</span></div>
+                    <div className="mt-1 text-[10px] text-txt-3 leading-4">{item.roleHint}</div>
+                  </button>
                 );
               })}
             </div>
-          ) : (
-            <div className="mt-4 text-xs font-mono text-gold-500/60">No contributor credentials revealed yet.</div>
-          )}
-        </div>
-
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-          <div className="text-xs font-mono text-gold-500/50">REWARDS & CLAIM</div>
-          <div className="mt-4 space-y-4 text-[11px] font-mono text-gold-500/75">
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/40 p-4">
-              <div className="flex items-center gap-2 text-cyan-300"><Globe className="w-4 h-4" /> Reward endpoints</div>
-              <div className="mt-2 break-all">{publicBase}/rewards/</div>
-              <div className="mt-1 break-all">{publicBase}/rewards/latest.json</div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/40 p-4">
-              <div className="flex items-center gap-2 text-cyan-300"><Wallet className="w-4 h-4" /> Reward identity</div>
-              <div className="mt-2">Rewards should follow the contributor wallet / operator address, not the API key.</div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/40 p-4">
-              <div className="flex items-center gap-2 text-cyan-300"><Code2 className="w-4 h-4" /> Contracts</div>
-              <div className="mt-2 break-all">OperatorRegistry: {OPERATOR_REGISTRY}</div>
-              <div className="mt-1 break-all">MerkleRewardDistributor: {DISTRIBUTOR}</div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/40 p-4">
-              <div className="flex items-center gap-2 text-cyan-300"><CheckCircle2 className="w-4 h-4" /> Claim flow</div>
-              <div className="mt-2">1. Get approved and contribute.</div>
-              <div className="mt-1">2. Wait for your address to appear in the published epoch.</div>
-              <div className="mt-1">3. Claim from the distributor once eligible.</div>
-            </div>
           </div>
-        </div>
+        </Card>
+
+        <Card>
+          <CardHead title="Submit application" meta="separate from public developer API plans" />
+          <div className="px-4 py-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              <div className="rounded-lg border border-line bg-ink-900 px-3 py-2.5 text-[12px] font-mono">
+                <span className="text-txt-3">role</span> <span className="text-txt">{roleLabel}</span>
+              </div>
+              <div className="rounded-lg border border-line bg-ink-900 px-3 py-2.5 text-[12px] font-mono">
+                <span className="text-txt-3">lane</span> <span className="text-txt">{selectedTier.label}</span>
+                <span className="text-txt-3"> · internal {selectedTier.internalTier}</span>
+              </div>
+            </div>
+
+            <div className="mt-2.5 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              <input
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                placeholder="Region (e.g. SG / MY / JP)"
+                className="bg-ink-900 border border-line rounded-lg px-3 py-2.5 text-[12px] font-mono text-txt outline-none focus:border-gold/50 transition-colors"
+              />
+              <input
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+                placeholder="Endpoint / IP / domain"
+                className="bg-ink-900 border border-line rounded-lg px-3 py-2.5 text-[12px] font-mono text-txt outline-none focus:border-gold/50 transition-colors"
+              />
+            </div>
+
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Short infra note: uptime target, region coverage, hardware, or operator intro…"
+              className="mt-2.5 w-full min-h-[96px] bg-ink-900 border border-line rounded-lg p-3 text-[12px] font-mono text-txt outline-none focus:border-gold/50 transition-colors"
+            />
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Btn tone="primary" disabled={!addr} onClick={requestContributorKey}>Submit application</Btn>
+              <Btn disabled={!addr} onClick={revealMyKeys}>Reveal my credentials</Btn>
+            </div>
+
+            {lastReq ? (
+              <pre className="mt-3 rounded-lg border border-line bg-ink-900 p-3 text-[10px] font-mono text-txt-2 whitespace-pre-wrap break-all max-h-40 overflow-auto">{JSON.stringify(lastReq, null, 2)}</pre>
+            ) : null}
+          </div>
+        </Card>
       </div>
 
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-        <div className="flex items-center gap-2 text-cyan-300 text-sm font-mono"><Code2 className="w-4 h-4" /> Example setup</div>
-        <pre className="mt-4 text-[11px] font-mono text-gold-500/75 whitespace-pre-wrap break-all">{`CHAIN_ID=18441
+      <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4 mb-4">
+        <Card>
+          <CardHead title="Contributor credentials" meta={`RPC base ${publicBase}/rpc/`} />
+          <div className="px-4 py-3">
+            {revealedKeys && revealedKeys.length ? (
+              <div className="space-y-2.5">
+                {revealedKeys.map((item, idx) => {
+                  const tierPath = `${publicBase}/rpc/${String(item.tier)}/${String(item.key)}/`;
+                  return (
+                    <div key={`${item.key}-${idx}`} className="rounded-lg border border-line bg-ink-900 p-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge tone="gold">{String(item.tier)}</Badge>
+                        <span className="text-[12px] font-mono text-txt break-all">{item.key}</span>
+                        <CopyBtn value={String(item.key)} label="API key" />
+                      </div>
+                      <div className="mt-2 grid grid-cols-1 gap-1 text-[11px] font-mono">
+                        <div><span className="text-txt-3">header</span> <span className="text-txt-2">X-API-Key: {item.key}</span></div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-txt-3">path</span>
+                          <span className="text-cyan break-all">{tierPath}</span>
+                          <CopyBtn value={tierPath} label="tier path" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-[12px] text-txt-3">No contributor credentials revealed yet — connect a wallet and use “Reveal my credentials”.</div>
+            )}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHead title="Rewards & claim" />
+          <div className="px-4 py-3 space-y-2.5 text-[12px]">
+            <div className="rounded-lg border border-line bg-ink-900 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-txt-3">Published epochs</div>
+              <div className="mt-1 font-mono text-cyan break-all">{publicBase}/rewards/latest.json</div>
+            </div>
+            <div className="rounded-lg border border-line bg-ink-900 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-txt-3">Contracts</div>
+              <div className="mt-1 font-mono text-[11px] text-txt-2 break-all">Registry {OPERATOR_REGISTRY}</div>
+              <div className="mt-0.5 font-mono text-[11px] text-txt-2 break-all">Distributor {DISTRIBUTOR}</div>
+            </div>
+            <div className="rounded-lg border border-line bg-ink-900 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-txt-3">Claim flow</div>
+              <div className="mt-1 space-y-1 text-[11px] text-txt-2 leading-4">
+                <div className="flex items-start gap-1.5"><CheckCircle2 className="w-3 h-3 mt-0.5 text-ok shrink-0" /> Get approved and contribute.</div>
+                <div className="flex items-start gap-1.5"><CheckCircle2 className="w-3 h-3 mt-0.5 text-ok shrink-0" /> Wait for your address in a published epoch.</div>
+                <div className="flex items-start gap-1.5"><CheckCircle2 className="w-3 h-3 mt-0.5 text-ok shrink-0" /> Claim from the distributor once eligible.</div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHead title="Example setup" />
+        <div className="px-4 py-3">
+          <pre className="rounded-lg border border-line bg-ink-900 p-3 text-[11px] font-mono text-txt-2 whitespace-pre-wrap break-all">{`CHAIN_ID=18441
 RPC_URL=${publicBase}/rpc/
 RPC_API_KEY=<your contributor key>
 ROLE=${role}
@@ -636,7 +539,8 @@ ENDPOINT=${endpoint || '<your endpoint>'}
 REWARDS_URL=${publicBase}/rewards/latest.json
 OPERATOR_ADDRESS=<your wallet>
 DISTRIBUTOR_ADDRESS=${DISTRIBUTOR}`}</pre>
-      </div>
-    </motion.div>
+        </div>
+      </Card>
+    </Page>
   );
 }

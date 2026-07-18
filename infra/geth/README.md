@@ -21,4 +21,4 @@ These files were reconstructed from the **currently running containers** on the 
 - Signers expose only p2p (`30303` tcp/udp).
 - RPC nodes expose p2p + `8545`/`8546`.
 - Archive/indexer node exposes p2p + `8545`/`8546` and enables `debug` / `txpool` APIs.
-- The explorer source in `explorer/aurascan-preview/` was **not** overwritten from infra because the local workspace copy is newer UI/UX than the currently deployed infra build.
+- The explorer source in `explorer/aurascan-preview/` is deployed to infra-1 at `/opt/aurascan-explorer` (repo and server are in sync as of 2026-07-18). AuraScan is the default site on port 80; the Blockscout frontend remains reachable on `:3000` (and the cyber theme on `:3003`).

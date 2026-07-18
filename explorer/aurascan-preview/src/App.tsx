@@ -1,155 +1,124 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
-import { Search, Activity, Zap, Globe, Database, Hash, Clock, Box, ArrowRightLeft, Cpu, ChevronRight, ChevronLeft, CheckCircle2, Layers, Info, Code2, Menu, X, List } from 'lucide-react';
+import {
+  Search, Box, ArrowRightLeft, Cpu, Menu, X, Database, Code2, ShieldCheck,
+} from 'lucide-react';
 import ContributorProgram from './ContributorProgram';
+import { bs, rpc, rpcBlockNumber, resolveCliqueSigners, navigateTo, CHAIN_ID, NATIVE_SYMBOL, adminApiBase, publicBase } from './lib/api';
+import { short, shortAddr, fmtWei, fmtUnits, fmtNum, timeAgo, fmtStamp, gasPct } from './lib/format';
+import {
+  Card, CardHead, Page, PageTitle, Badge, StatusBadge, LivePill, Btn, CopyBtn, LinkText,
+  Tabs, Pager, Table, Th, Td, TRow, SkeletonRows, Empty, KV, GasBar, StatTile, Notice, Modal,
+} from './components/ui';
 
-function navigateTo(path: string) {
-  try {
-    window.history.pushState({}, '', path);
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  } catch {
-    window.location.href = path;
-  }
-}
+/* ----------------------------- Shared helpers ------------------------------ */
 
-async function copyToClipboard(text: string) {
+const methodLabel = (tx: any) => {
   try {
-    if (navigator.clipboard && (window as any).isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
+    const di = tx?.decoded_input;
+    if (di) {
+      const mc = (di as any)?.method_call || (di as any)?.method;
+      if (mc && String(mc).trim()) return String(mc).trim().split('(')[0];
+      const mid = (di as any)?.method_id;
+      if (mid && String(mid).trim()) return String(mid).trim();
     }
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
-    return ok;
+    if (tx?.method && String(tx.method).trim()) return String(tx.method).trim();
+    if (tx?.created_contract?.hash) return 'create';
+    const ri = String(tx?.raw_input || '');
+    if (!ri || ri === '0x' || ri.length < 10) return 'transfer';
+    return ri.slice(0, 10);
   } catch {
-    return false;
+    return '—';
   }
-}
-
-const generateHash = (length = 40) => '0x' + Array.from({length}, () => Math.floor(Math.random()*16).toString(16)).join('');
-
-const generateBlock = (height: number) => ({
-  height,
-  hash: generateHash(64),
-  miner: 'DCAINode_' + Math.floor(Math.random() * 999).toString().padStart(3, '0'),
-  txCount: Math.floor(Math.random() * 500) + 50,
-  time: new Date().toLocaleTimeString('en-US', { hour12: false }),
-  reward: (Math.random() * 10 + 2).toFixed(2)
-});
-
-const generateBlockDetails = (baseBlock: any) => ({
-  ...baseBlock,
-  status: 'FINALIZED',
-  confirmations: Math.floor(Math.random() * 1000) + 120,
-  size: (Math.random() * 50 + 10).toFixed(2) + ' KB',
-  gasUsed: Math.floor(Math.random() * 15000000),
-  gasLimit: 30000000,
-  parentHash: generateHash(64),
-  stateRoot: generateHash(64),
-  nonce: '0x' + Math.floor(Math.random() * 1000000000000000).toString(16)
-});
-
-const generateTx = () => ({
-  hash: generateHash(64),
-  from: generateHash(40),
-  to: generateHash(40),
-  value: (Math.random() * 1000).toFixed(2),
-  fee: (Math.random() * 0.01).toFixed(4),
-  time: new Date().toLocaleTimeString('en-US', { hour12: false }),
-});
-
-const CursorFollower = () => {
-  const [pos, setPos] = useState({ x: -100, y: -100 });
-  
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      setPos({ x: e.clientX, y: e.clientY });
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
-
-  return (
-    <motion.div
-      className="fixed top-0 left-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-[100px] pointer-events-none z-0"
-      animate={{ x: pos.x - 192, y: pos.y - 192 }}
-      transition={{ type: 'tween', ease: 'backOut', duration: 0.5 }}
-    />
-  );
 };
 
-const Header = ({
-  active,
-  onHome,
-  onBlocks,
-  onTxs,
-  onTokens,
-  onContributors,
-  onDashboard,
-}: {
-  active: 'home' | 'blocks' | 'txs' | 'tx' | 'block' | 'address' | 'tokens' | 'token' | 'contributors' | 'dashboard',
-  onHome: () => void,
-  onBlocks: () => void,
-  onTxs: () => void,
-  onTokens: () => void,
-  onContributors: () => void,
-  onDashboard: () => void,
-}) => {
-  const [mobileOpen, setMobileOpen] = useState(false);
+const EVENT_SIGS: Record<string, string> = {
+  '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef': 'Transfer(address,address,uint256)',
+  '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925': 'Approval(address,address,uint256)',
+};
 
-  const NavItem = ({ label, isActive, onClick }: { label: string, isActive?: boolean, onClick?: () => void }) => (
-    <button
-      onClick={onClick}
-      className={`text-sm font-mono transition-all ${isActive ? 'text-cyan-300 glow-text-cyan' : 'text-gold-500/70 hover:text-cyan-400 hover:glow-text-cyan'}`}
-    >
-      {label}
-    </button>
-  );
+const eventName = (topic0?: string) => {
+  if (!topic0) return 'Unknown event';
+  const k = String(topic0).toLowerCase();
+  return EVENT_SIGS[k] || 'Unknown event';
+};
+
+/* --------------------------------- Header ---------------------------------- */
+
+type ViewKey = 'home' | 'blocks' | 'txs' | 'tx' | 'block' | 'address' | 'tokens' | 'token' | 'contributors' | 'dashboard';
+
+const NAV: { label: string; k: ViewKey[]; path: string }[] = [
+  { label: 'Blocks', k: ['blocks', 'block'], path: '/blocks' },
+  { label: 'Transactions', k: ['txs', 'tx'], path: '/txs' },
+  { label: 'Tokens', k: ['tokens', 'token'], path: '/tokens' },
+  { label: 'Contributors', k: ['contributors'], path: '/contributors' },
+  { label: 'API', k: ['dashboard'], path: '/dashboard' },
+];
+
+const Header = ({ active }: { active: ViewKey }) => {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [head, setHead] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const bn = await rpcBlockNumber();
+      if (bn != null && !cancelled) setHead(bn);
+    };
+    load();
+    const t = setInterval(load, 2000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
+  const go = (path: string) => {
+    setMobileOpen(false);
+    navigateTo(path);
+  };
 
   return (
-    <header className="sticky top-0 z-[100] bg-dark-900/80 backdrop-blur-md border-b border-gold-500/20 pointer-events-auto">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-3 cursor-pointer group" onClick={() => { setMobileOpen(false); onHome(); }}>
-          <div className="w-8 h-8 rounded bg-gold-500 flex items-center justify-center shadow-[0_0_10px_#FFD700] group-hover:shadow-[0_0_20px_#FFD700] transition-shadow">
-            <Cpu className="w-5 h-5 text-dark-900" />
+    <header className="sticky top-0 z-[100] bg-ink-950/85 backdrop-blur-md border-b border-line">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2.5 cursor-pointer shrink-0" onClick={() => go('/')}>
+          <div className="w-7 h-7 rounded-lg bg-gold flex items-center justify-center">
+            <Cpu className="w-4 h-4 text-ink-950" />
           </div>
-          <span className="font-black text-xl tracking-widest glow-text">DCAI<span className="text-cyan-400 glow-text-cyan">L3</span></span>
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1 ml-4 rounded-full border border-cyan-500/30 bg-cyan-500/10">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
-            </span>
-            <span className="text-[10px] font-mono font-bold tracking-widest text-cyan-400">TESTNET</span>
-          </div>
+          <span className="font-bold text-[15px] tracking-tight text-txt">
+            DCAI <span className="text-gold">L3</span>
+          </span>
+          <Badge tone="cyan" className="hidden sm:inline-flex">testnet</Badge>
         </div>
 
-        <nav className="hidden md:flex items-center gap-8">
-          <NavItem label="BLOCKS" isActive={active === 'blocks' || active === 'block'} onClick={() => { setMobileOpen(false); onBlocks(); }} />
-          <NavItem label="TRANSACTIONS" isActive={active === 'txs' || active === 'tx'} onClick={() => { setMobileOpen(false); onTxs(); }} />
-          <NavItem label="TOKENS" isActive={active === 'tokens' || active === 'token'} onClick={() => { setMobileOpen(false); onTokens(); }} />
-          <NavItem label="NODES" isActive={active === 'contributors'} onClick={() => { setMobileOpen(false); onContributors(); }} />
-          <NavItem label="API" isActive={active === 'dashboard'} onClick={() => { setMobileOpen(false); onDashboard(); }} />
+        <nav className="hidden md:flex items-center gap-1">
+          {NAV.map((n) => (
+            <button
+              key={n.label}
+              onClick={() => go(n.path)}
+              className={`px-3 py-1.5 rounded-lg text-[13px] transition-colors ${
+                n.k.includes(active) ? 'text-gold font-semibold bg-gold/10' : 'text-txt-2 hover:text-txt'
+              }`}
+            >
+              {n.label}
+            </button>
+          ))}
         </nav>
 
-        <div className="flex items-center gap-3">
-          <button className="hidden sm:inline-flex glow-box px-4 py-1.5 rounded text-xs font-mono font-bold hover:bg-cyan-500 hover:text-dark-900 hover:shadow-[0_0_15px_#00F0FF] transition-all border-cyan-500/50 text-cyan-400">
-            CONNECT WALLET
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            onClick={() => head != null && navigateTo(`/block/${head}`)}
+            title="Chain head (live)"
+            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-line hover:border-line-2 transition-colors"
+          >
+            <span className="live-dot w-1.5 h-1.5 rounded-full bg-cyan inline-block" />
+            <span className="text-[11px] font-mono tnum text-txt-2">{head != null ? `#${fmtNum(head)}` : '—'}</span>
           </button>
 
           <button
-            onClick={() => setMobileOpen(v => !v)}
-            className="md:hidden w-10 h-10 inline-flex items-center justify-center rounded-lg border border-cyan-500/20 text-cyan-300 hover:border-cyan-400/50"
+            onClick={() => setMobileOpen((v) => !v)}
+            className="md:hidden w-9 h-9 inline-flex items-center justify-center rounded-lg border border-line text-txt-2"
             aria-label="Menu"
           >
-            {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {mobileOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
           </button>
         </div>
       </div>
@@ -157,21 +126,24 @@ const Header = ({
       <AnimatePresence>
         {mobileOpen ? (
           <motion.div
-            initial={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.16 }}
-            className="md:hidden border-t border-gold-500/10 bg-dark-900/95 backdrop-blur-md"
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.14 }}
+            className="md:hidden border-t border-line bg-ink-950/95 backdrop-blur-md"
           >
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col gap-3">
-              <NavItem label="BLOCKS" isActive={active === 'blocks' || active === 'block'} onClick={() => { setMobileOpen(false); onBlocks(); }} />
-              <NavItem label="TRANSACTIONS" isActive={active === 'txs' || active === 'tx'} onClick={() => { setMobileOpen(false); onTxs(); }} />
-              <NavItem label="TOKENS" isActive={active === 'tokens' || active === 'token'} onClick={() => { setMobileOpen(false); onTokens(); }} />
-              <NavItem label="NODES" isActive={active === 'contributors'} onClick={() => { setMobileOpen(false); onContributors(); }} />
-              <NavItem label="API" isActive={active === 'dashboard'} onClick={() => { setMobileOpen(false); onDashboard(); }} />
-              <button className="mt-2 glow-box px-4 py-2 rounded text-xs font-mono font-bold border-cyan-500/50 text-cyan-300 hover:bg-cyan-500 hover:text-dark-900 transition-all">
-                CONNECT WALLET
-              </button>
+            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col gap-1">
+              {NAV.map((n) => (
+                <button
+                  key={n.label}
+                  onClick={() => go(n.path)}
+                  className={`px-3 py-2 rounded-lg text-left text-[13px] ${
+                    n.k.includes(active) ? 'text-gold font-semibold bg-gold/10' : 'text-txt-2'
+                  }`}
+                >
+                  {n.label}
+                </button>
+              ))}
             </div>
           </motion.div>
         ) : null}
@@ -180,7 +152,9 @@ const Header = ({
   );
 };
 
-const Hero = () => {
+/* -------------------------------- Search bar -------------------------------- */
+
+const SearchBar = () => {
   const [q, setQ] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
@@ -190,76 +164,45 @@ const Hero = () => {
     if (!raw || searching) return;
     setErr(null);
     setSearching(true);
-
     const s = raw;
-
     const norm0x = (h: string) => (h.startsWith('0x') ? h : `0x${h}`);
 
     try {
-      // block number (123 or #123)
       const mBlock = s.match(/^#?(\d+)$/);
       if (mBlock) {
         navigateTo(`/block/${mBlock[1]}`);
         return;
       }
-
-      // address without/with 0x
       if (/^(0x)?[0-9a-fA-F]{40}$/.test(s)) {
         navigateTo(`/address/${norm0x(s)}`);
         return;
       }
-
-      // 64-hex can be tx hash OR block hash → ask Blockscout search to disambiguate
       if (/^(0x)?[0-9a-fA-F]{64}$/.test(s)) {
         const q0 = norm0x(s);
-        const res = await fetch(`/api/v2/search?q=${encodeURIComponent(q0)}`, { cache: 'no-store' });
-        const j = await res.json();
+        const j = await bs(`/search?q=${encodeURIComponent(q0)}`);
         const it = j?.items?.[0];
         if (it?.type === 'transaction' && it?.transaction_hash) {
           navigateTo(`/tx/${String(it.transaction_hash)}`);
           return;
         }
         if (it?.type === 'block' && (it?.block_number != null || it?.block_hash)) {
-          // Prefer numeric height since our router already supports it
-          if (it.block_number != null) {
-            navigateTo(`/block/${String(it.block_number)}`);
-          } else {
-            navigateTo(`/block/${String(it.block_hash)}`);
-          }
+          navigateTo(`/block/${String(it.block_number != null ? it.block_number : it.block_hash)}`);
           return;
         }
-        // default fallback
         navigateTo(`/tx/${q0}`);
         return;
       }
-
-      // General search (token name, etc.)
-      const res = await fetch(`/api/v2/search?q=${encodeURIComponent(s)}`, { cache: 'no-store' });
-      const j = await res.json();
+      const j = await bs(`/search?q=${encodeURIComponent(s)}`);
       const it = j?.items?.[0];
       if (!it) {
-        setErr('Not found.');
+        setErr('No results.');
         return;
       }
-
-      if (it.type === 'address' && it.address) {
-        navigateTo(`/address/${String(it.address)}`);
-        return;
-      }
-      if (it.type === 'transaction' && it.transaction_hash) {
-        navigateTo(`/tx/${String(it.transaction_hash)}`);
-        return;
-      }
-      if (it.type === 'block' && it.block_number != null) {
-        navigateTo(`/block/${String(it.block_number)}`);
-        return;
-      }
-      if (it.url) {
-        // Last resort: follow Blockscout-provided URL
-        navigateTo(String(it.url));
-        return;
-      }
-
+      if (it.type === 'address' && it.address) { navigateTo(`/address/${String(it.address)}`); return; }
+      if (it.type === 'token' && it.address) { navigateTo(`/token/${String(it.address)}`); return; }
+      if (it.type === 'transaction' && it.transaction_hash) { navigateTo(`/tx/${String(it.transaction_hash)}`); return; }
+      if (it.type === 'block' && it.block_number != null) { navigateTo(`/block/${String(it.block_number)}`); return; }
+      if (it.url) { navigateTo(String(it.url)); return; }
       setErr('Not supported yet.');
     } catch {
       setErr('Search failed.');
@@ -269,62 +212,35 @@ const Hero = () => {
   };
 
   return (
-    <div className="py-20 flex flex-col items-center justify-center text-center relative">
-      <motion.div
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 1, ease: 'easeOut' }}
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-500/5 rounded-full blur-3xl pointer-events-none"
-      />
-
-      <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="relative z-10 mb-8">
-        <h1 className="text-5xl md:text-7xl font-black tracking-tighter mb-4">
-          DCAI{' '}
-          <span className="glow-text-cyan text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 to-cyan-600">FOUNDATION</span>
-        </h1>
-        <p className="font-mono text-gold-500/60 max-w-2xl mx-auto">
-          EXPLORE THE DCAI L3 NETWORK. REAL-TIME DATA STREAMING. UNCOMPROMISED SECURITY.
-        </p>
-      </motion.div>
-
-      <motion.div
-        initial={{ y: 20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.2 }}
-        className="w-full max-w-3xl relative z-10 group px-4"
-      >
-        <div className="absolute -inset-1 bg-gradient-to-r from-gold-600 via-cyan-500 to-gold-400 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-500" />
-        <div className="relative flex items-center bg-dark-800/90 backdrop-blur-sm border border-cyan-500/40 rounded-xl p-2 shadow-[0_0_30px_rgba(0,240,255,0.1)]">
-          <div className="pl-4 pr-2">
-            <Search className="w-6 h-6 text-cyan-400" />
-          </div>
+    <div className="relative z-10 border-b border-line bg-ink-900/60">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+        <div className="flex items-center gap-2 rounded-xl border border-line bg-ink-800 px-3 focus-within:border-gold/50 transition-colors">
+          <Search className="w-4 h-4 text-txt-3 shrink-0" />
           <input
             type="text"
             value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
-              if (err) setErr(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') doSearch();
-            }}
-            placeholder="Search by Address / Txn Hash / Block / Token..."
-            className="w-full bg-transparent border-none outline-none text-gold-500 placeholder-gold-500/40 font-mono text-sm sm:text-lg py-3"
+            onChange={(e) => { setQ(e.target.value); if (err) setErr(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') doSearch(); }}
+            placeholder="Search by address / tx hash / block / token"
+            className="w-full bg-transparent border-none outline-none text-txt placeholder-txt-3 font-mono text-[13px] py-2.5"
           />
+          {err ? <span className="text-[11px] text-bad shrink-0">{err}</span> : null}
           <button
             onClick={doSearch}
             disabled={searching}
-            className={`bg-cyan-500 text-dark-900 px-4 sm:px-8 py-3 rounded-lg font-bold font-mono transition-colors shadow-[0_0_15px_rgba(0,240,255,0.5)] ${searching ? 'opacity-60 cursor-not-allowed' : 'hover:bg-cyan-400'}`}
+            className={`shrink-0 px-4 py-1.5 my-1 rounded-lg text-[12px] font-semibold transition-colors ${
+              searching ? 'bg-gold/30 text-ink-950/60' : 'bg-gold text-ink-950 hover:bg-gold-2'
+            }`}
           >
-            {searching ? 'SCANNING…' : 'SCAN'}
+            {searching ? 'Searching…' : 'Search'}
           </button>
         </div>
-
-        {err ? <div className="mt-3 text-[11px] font-mono text-rose-300">{err}</div> : null}
-      </motion.div>
+      </div>
     </div>
   );
 };
+
+/* ------------------------------- Network stats ------------------------------- */
 
 const Stats = () => {
   const [stats, setStats] = useState<any>(null);
@@ -341,44 +257,18 @@ const Stats = () => {
     let cancelled = false;
 
     const load = async () => {
-      try {
-        const res = await fetch('/api/v2/stats', { cache: 'no-store' });
-        if (res.status === 429) return;
-        const data = await res.json();
-        if (!cancelled) setStats(data);
-      } catch (e) {
-        // keep previous
-      }
+      const data = await bs('/stats');
+      if (data && !cancelled) setStats(data);
     };
     const loadLatest = async () => {
-      try {
-        // Use the same Blockscout API as the blocks list so the UI stays consistent
-        const res = await fetch('/api/v2/blocks?type=block&limit=1', { cache: 'no-store' });
-        if (res.status === 429) return;
-        const data = await res.json();
-        const h = Number(data?.items?.[0]?.height);
-        if (Number.isFinite(h) && !cancelled) setLatestBlock(h);
-      } catch {}
+      const data = await bs('/blocks?type=block&limit=1');
+      const h = Number(data?.items?.[0]?.height);
+      if (Number.isFinite(h) && !cancelled) setLatestBlock(h);
     };
-
     const loadHead = async () => {
-      try {
-        // RPC head block (real-time). This is usually ahead of Blockscout "indexed" height.
-        const res = await fetch('/rpc1/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
-          cache: 'no-store',
-        });
-        const j = await res.json();
-        const hx = j?.result;
-        if (typeof hx === 'string' && hx.startsWith('0x')) {
-          const bn = parseInt(hx, 16);
-          if (Number.isFinite(bn) && !cancelled) setHeadBlock(bn);
-        }
-      } catch {}
+      const bn = await rpcBlockNumber();
+      if (bn != null && !cancelled) setHeadBlock(bn);
     };
-
     const loadLiveTxCounters = async () => {
       try {
         const baseToday = stats?.transactions_today != null ? Number(stats.transactions_today) : null;
@@ -394,9 +284,7 @@ const Stats = () => {
           lastSeenRef.current = null;
         }
 
-        const res = await fetch('/api/v2/blocks?type=block&limit=10', { cache: 'no-store' });
-        if (res.status === 429) return;
-        const data = await res.json();
+        const data = await bs('/blocks?type=block&limit=10');
         const items = (data?.items || []).map((b: any) => ({ height: Number(b.height), tx: Number(b.transaction_count ?? 0) }));
         if (!items.length) return;
         const newest = Math.max(...items.map((x: any) => x.height));
@@ -423,7 +311,6 @@ const Stats = () => {
     loadHead();
     loadLiveTxCounters();
     const t = setInterval(load, 30000);
-    // Indexed height doesn't need to be ultra-fast (Blockscout can lag behind head anyway)
     const t2 = setInterval(loadLatest, 5000);
     const tHead = setInterval(loadHead, 1000);
     const t3 = setInterval(loadLiveTxCounters, 4000);
@@ -439,89 +326,166 @@ const Stats = () => {
   const avgBlockSec = stats?.average_block_time ? (Number(stats.average_block_time) / 1000) : null;
   const indexedLag = headBlock != null && latestBlock != null ? Math.max(0, headBlock - latestBlock) : null;
 
-  const cards = [
-    {
-      label: 'LATEST BLOCK (HEAD)',
-      value: headBlock != null ? `#${headBlock}` : (latestBlock != null ? `#${latestBlock}` : (stats?.total_blocks ? `#${stats.total_blocks}` : '--')),
-      sub:
-        (avgBlockSec != null ? `${avgBlockSec.toFixed(2)}s avg` : 'avg --') +
-        ' · indexed ' +
-        (latestBlock != null ? `#${latestBlock}` : '--') +
-        (indexedLag != null ? ` · lag ${indexedLag}` : ''),
-      icon: Layers,
-      color: 'cyan',
-      pulse: true,
-    },
-    {
-      label: 'TX TODAY',
-      value: txTodayLive != null ? txTodayLive : (stats?.transactions_today ?? '--'),
-      sub: stats?.network_utilization_percentage != null ? `${Number(stats.network_utilization_percentage).toFixed(1)}% utilization` : 'utilization --',
-      icon: ArrowRightLeft,
-      color: 'gold',
-    },
-    {
-      label: 'TOTAL TX',
-      value: totalTxLive != null ? totalTxLive : (stats?.total_transactions ?? '--'),
-      sub: stats?.total_addresses != null ? `${stats.total_addresses} addresses` : 'addresses --',
-      icon: Hash,
-      color: 'cyan',
-    },
-    {
-      label: 'GAS (AVG)',
-      value: stats?.gas_prices?.average != null ? `${stats.gas_prices.average}` : '--',
-      sub: stats?.gas_prices ? `slow ${stats.gas_prices.slow} · fast ${stats.gas_prices.fast}` : 'slow/fast --',
-      icon: Zap,
-      color: 'gold',
-    },
-  ];
-
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-16 relative z-10">
-      {cards.map((c, i) => (
-        <motion.div
-          key={c.label}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 + i * 0.1 }}
-          className={`glow-box ${c.color === 'cyan' ? 'border-t-cyan-500/50 hover:border-cyan-500' : 'border-t-gold-500/50 hover:border-gold-500'} bg-dark-800/60 backdrop-blur-md p-6 rounded-xl border-t-2 flex flex-col items-center text-center group transition-colors`}
-        >
-          <div className={`mb-4 p-3 rounded-full ${c.color === 'cyan' ? 'bg-cyan-500/10 group-hover:bg-cyan-500/20' : 'bg-gold-500/10 group-hover:bg-gold-500/20'} transition-colors relative`}>
-            {c.pulse && (
-              <span className="absolute top-0 right-0 flex h-3 w-3">
-                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${c.color === 'cyan' ? 'bg-cyan-400' : 'bg-gold-500'} opacity-75`}></span>
-                <span className={`relative inline-flex rounded-full h-3 w-3 ${c.color === 'cyan' ? 'bg-cyan-500' : 'bg-gold-500'}`}></span>
-              </span>
-            )}
-            <c.icon className={`w-6 h-6 ${c.color === 'cyan' ? 'text-cyan-400' : 'text-gold-500'}`} />
-          </div>
-
-          <div className="text-xs font-mono text-gold-500/50 mb-1">{c.label}</div>
-          <div className={`text-xl sm:text-2xl font-bold font-mono ${c.color === 'cyan' ? 'glow-text-cyan text-cyan-400' : 'glow-text text-gold-500'}`}>{c.value}</div>
-          <div className="mt-2 text-[10px] font-mono text-gold-500/40">{c.sub}</div>
-        </motion.div>
-      ))}
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+      <StatTile
+        label="Chain head"
+        live
+        value={headBlock != null ? `#${fmtNum(headBlock)}` : (latestBlock != null ? `#${fmtNum(latestBlock)}` : '--')}
+        sub={indexedLag != null ? `indexed lag ${indexedLag}` : 'indexed --'}
+      />
+      <StatTile
+        label="Block time"
+        value={avgBlockSec != null ? `${avgBlockSec.toFixed(2)}s` : '--'}
+        sub="Clique PoA"
+      />
+      <StatTile
+        label="Txs today"
+        value={txTodayLive != null ? fmtNum(txTodayLive) : (stats?.transactions_today != null ? fmtNum(stats.transactions_today) : '--')}
+        sub={stats?.network_utilization_percentage != null ? `${Number(stats.network_utilization_percentage).toFixed(1)}% utilization` : undefined}
+      />
+      <StatTile
+        label="Total txs"
+        value={totalTxLive != null ? fmtNum(totalTxLive) : (stats?.total_transactions != null ? fmtNum(stats.total_transactions) : '--')}
+      />
+      <StatTile
+        label="Addresses"
+        value={stats?.total_addresses != null ? fmtNum(stats.total_addresses) : '--'}
+      />
+      <StatTile
+        label="Gas (gwei-ish)"
+        value={stats?.gas_prices?.average != null ? String(stats.gas_prices.average) : '--'}
+        sub={stats?.gas_prices ? `slow ${stats.gas_prices.slow} · fast ${stats.gas_prices.fast}` : undefined}
+      />
     </div>
   );
 };
 
-const DetailRow = ({ label, value, isCyan = false, onCopy }: { label: string, value: string | number, isCyan?: boolean, onCopy?: () => void }) => (
-  <div className="flex flex-col gap-1 border-b border-gold-500/10 pb-4">
-    <span className="text-xs font-mono text-gold-500/50">{label}</span>
-    <div className="flex items-start justify-between gap-3">
-      <div className={`text-sm font-mono break-all ${isCyan ? 'text-cyan-400 glow-text-cyan' : 'text-gold-400'}`}>
-        {value}
+/* -------------------------------- Home tables -------------------------------- */
+
+const HomeView = ({
+  blocks,
+  txs,
+  onViewBlock,
+  onViewTx,
+}: {
+  blocks: any[];
+  txs: any[];
+  onViewBlock: (b: any) => void;
+  onViewTx: (h: string) => void;
+}) => (
+  <Page>
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-2">
+      <div>
+        <h1 className="text-xl font-bold tracking-tight text-txt">DCAI L3 Explorer</h1>
+        <div className="mt-1 text-[12px] text-txt-2 font-mono">
+          chainId {CHAIN_ID} · {NATIVE_SYMBOL} · Clique PoA · ~2s blocks
+        </div>
       </div>
-      {onCopy ? (
-        <button
-          onClick={onCopy}
-          className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors"
-        >
-          ⧉
-        </button>
-      ) : null}
+      <div className="text-[11px] font-mono text-txt-3">AuraScan</div>
     </div>
-  </div>
+
+    <Stats />
+
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <Card>
+        <CardHead
+          title="Latest blocks"
+          meta={<LivePill />}
+          actions={<LinkText onClick={() => navigateTo('/blocks')} className="text-[11px]">View all →</LinkText>}
+        />
+        <Table>
+          <thead>
+            <tr>
+              <Th>Block</Th>
+              <Th>Age</Th>
+              <Th>Signer</Th>
+              <Th right>Txns</Th>
+              <Th right>Fees ({NATIVE_SYMBOL})</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {blocks.length === 0 ? (
+              <SkeletonRows rows={10} cols={5} />
+            ) : (
+              blocks.slice(0, 12).map((b: any) => (
+                <TRow key={b.height} flash={!!b._new}>
+                  <Td mono>
+                    <LinkText onClick={() => onViewBlock(b)} className="text-[12px]">#{b.height}</LinkText>
+                  </Td>
+                  <Td mono className="text-txt-3" title={String(b.timestamp || '')}>{timeAgo(b.timestamp)}</Td>
+                  <Td mono>
+                    <LinkText tone="muted" onClick={() => b.validator && navigateTo(`/address/${b.validator}`)} title={b.validator}>
+                      {b.miner}
+                    </LinkText>
+                  </Td>
+                  <Td right mono className="text-txt-2">{b.txCount}</Td>
+                  <Td right mono className="text-gold">{b.reward}</Td>
+                </TRow>
+              ))
+            )}
+          </tbody>
+        </Table>
+      </Card>
+
+      <Card>
+        <CardHead
+          title="Latest transactions"
+          meta={<LivePill />}
+          actions={<LinkText onClick={() => navigateTo('/txs')} className="text-[11px]">View all →</LinkText>}
+        />
+        <Table>
+          <thead>
+            <tr>
+              <Th>Tx hash</Th>
+              <Th>Method</Th>
+              <Th>From / To</Th>
+              <Th right>Value ({NATIVE_SYMBOL})</Th>
+              <Th right>Age</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {txs.length === 0 ? (
+              <SkeletonRows rows={10} cols={5} />
+            ) : (
+              txs.slice(0, 12).map((tx: any) => (
+                <TRow key={tx.hash} flash={!!tx._new}>
+                  <Td mono>
+                    <LinkText onClick={() => onViewTx(tx.hash)} title={tx.hash} className="text-[12px]">
+                      {short(tx.hash, 10, 6)}
+                    </LinkText>
+                  </Td>
+                  <Td>
+                    <div className="flex items-center gap-1.5">
+                      <StatusBadge status={tx.result} />
+                      <Badge tone="neutral" className="max-w-[110px] overflow-hidden text-ellipsis" title={String(tx.method ?? 'txn')}>
+                        {String(tx.method ?? 'txn')}
+                      </Badge>
+                    </div>
+                  </Td>
+                  <Td mono>
+                    <div className="flex flex-col leading-4">
+                      <LinkText tone="muted" onClick={() => tx.from && tx.from !== '--' && navigateTo(`/address/${tx.from}`)} title={tx.from} className="text-[11px]">
+                        {shortAddr(tx.from)}
+                      </LinkText>
+                      <LinkText tone="muted" onClick={() => tx.to && tx.to !== '--' && navigateTo(`/address/${tx.to}`)} title={tx.to} className="text-[11px]">
+                        → {shortAddr(tx.to)}
+                      </LinkText>
+                    </div>
+                  </Td>
+                  <Td right mono className="text-gold" title={`fee ${tx.fee} ${NATIVE_SYMBOL}`}>{tx.value}</Td>
+                  <Td right mono className="text-txt-3" title={String(tx.timestamp || '')}>{timeAgo(tx.timestamp)}</Td>
+                </TRow>
+              ))
+            )}
+          </tbody>
+        </Table>
+      </Card>
+    </div>
+  </Page>
 );
+
+/* ------------------------------- Blocks list -------------------------------- */
 
 const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) => {
   const [items, setItems] = useState<any[] | null>(null);
@@ -543,8 +507,6 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
   const [nextParams, setNextParams] = useState<any | null>(null);
   const [prevStack, setPrevStack] = useState<any[]>([]);
 
-  const short = (s: string, a = 10, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
-
   const setBlocksUrl = (p: any | null, replace = false) => {
     try {
       const sp = new URLSearchParams();
@@ -559,10 +521,9 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
   useEffect(() => {
     let cancelled = false;
 
-    const buildUrl = () => {
+    const buildPath = () => {
       const sp = new URLSearchParams();
       sp.set('type', 'block');
-      // Blockscout typically returns 50 items per page; keep limit small anyway.
       sp.set('limit', '25');
       if (pageParams) {
         for (const [k, v] of Object.entries(pageParams)) {
@@ -570,56 +531,46 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
           sp.set(String(k), String(v));
         }
       }
-      return `/api/v2/blocks?${sp.toString()}`;
+      return `/blocks?${sp.toString()}`;
     };
 
     const load = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(buildUrl(), { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) {
-          setItems(j?.items || []);
-          setNextParams(j?.next_page_params || null);
-        }
-      } catch {}
-      finally { if (!cancelled) setLoading(false); }
+      setLoading(true);
+      const j = await bs(buildPath());
+      if (j && !cancelled) {
+        const its = j?.items || [];
+        setItems(its);
+        setNextParams(j?.next_page_params || null);
+
+        const heights = its.map((b: any) => Number(b.height)).filter((h: number) => Number.isFinite(h));
+        resolveCliqueSigners(heights).then((m) => {
+          if (cancelled || !Object.keys(m).length) return;
+          setItems((prev) =>
+            (prev || []).map((b: any) => (m[Number(b.height)] ? { ...b, _signer: m[Number(b.height)] } : b))
+          );
+        });
+      }
+      if (!cancelled) setLoading(false);
     };
 
     load();
-
-    // Only auto-refresh the first page
     if (!pageParams) {
       const id = window.setInterval(load, 8000);
       return () => { cancelled = true; window.clearInterval(id); };
     }
-
     return () => { cancelled = true; };
   }, [pageParams]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
-    >
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/20 shadow-[0_0_20px_rgba(0,240,255,0.10)]">
-            <List className="w-8 h-8 text-cyan-400" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-3xl md:text-4xl font-black tracking-widest">BLOCKS <span className="glow-text-cyan text-cyan-400">LIST</span></h1>
-            <div className="mt-2 text-xs font-mono text-gold-500/60">{loading ? 'Loading…' : (items ? `${items.length} block(s)` : '—')}</div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            disabled={prevStack.length === 0}
-            onClick={() => {
+    <Page>
+      <PageTitle
+        title="Blocks"
+        sub={loading ? 'Loading…' : (items ? `${items.length} blocks on this page` : '—')}
+        right={
+          <Pager
+            canPrev={prevStack.length > 0}
+            canNext={!!nextParams}
+            onPrev={() => {
               if (!prevStack.length) return;
               const copy = prevStack.slice();
               const prev = copy.pop();
@@ -627,65 +578,81 @@ const BlocksListView = ({ onViewBlock }: { onViewBlock: (h: number) => void }) =
               setBlocksUrl(prev || null);
               setPageParams(prev || null);
             }}
-            className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${prevStack.length ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
-          >
-            PREV
-          </button>
-
-          <button
-            disabled={!nextParams}
-            onClick={() => {
+            onNext={() => {
               if (!nextParams) return;
-              setPrevStack(s => [...s, pageParams]);
+              setPrevStack((s) => [...s, pageParams]);
               setBlocksUrl(nextParams);
               setPageParams(nextParams);
             }}
-            className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${nextParams ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
-          >
-            NEXT
-          </button>
-        </div>
-      </div>
+          />
+        }
+      />
 
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-        <div className="space-y-3">
-          {(items || []).map((b: any) => (
-            <motion.div
-              key={b.hash}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.16 }}
-              className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <button
-                    onClick={() => onViewBlock(Number(b.height))}
-                    className="text-left text-sm font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                  >
-                    Block #{b.height}
-                  </button>
-                  <div className="mt-1 text-[11px] font-mono text-gold-500/60 break-all">{short(String(b.hash || ''))}</div>
-                  <div className="mt-1 text-[10px] font-mono text-gold-500/40">miner {short(String(b.miner?.hash || '0x0'))} · tx {b.transaction_count ?? '--'} · size {b.size ?? '--'} bytes</div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="text-[11px] font-mono text-gold-500/60">{String(b.timestamp || '').replace('T', ' ').replace('Z', '')}</div>
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/40">gas used {b.gas_used ?? '--'} / {b.gas_limit ?? '--'}</div>
-                </div>
-              </div>
-            </motion.div>
-          ))}
-
-          {!loading && items && items.length === 0 ? (
-            <div className="text-xs font-mono text-gold-500/60">No blocks.</div>
-          ) : null}
-        </div>
-      </div>
-    </motion.div>
+      <Card>
+        <Table>
+          <thead>
+            <tr>
+              <Th>Block</Th>
+              <Th>Age</Th>
+              <Th>Hash</Th>
+              <Th>Signer</Th>
+              <Th right>Txns</Th>
+              <Th right>Gas used</Th>
+              <Th right>Base fee (wei)</Th>
+              <Th right>Size</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {items == null ? (
+              <SkeletonRows rows={12} cols={8} />
+            ) : items.length === 0 ? (
+              <tr><td colSpan={8}><Empty label="No blocks." /></td></tr>
+            ) : (
+              items.map((b: any) => (
+                <TRow key={b.hash}>
+                  <Td mono>
+                    <LinkText onClick={() => onViewBlock(Number(b.height))}>#{b.height}</LinkText>
+                  </Td>
+                  <Td mono className="text-txt-3" title={String(b.timestamp || '')}>{timeAgo(b.timestamp)}</Td>
+                  <Td mono>
+                    <span className="text-txt-2" title={String(b.hash || '')}>{short(String(b.hash || ''), 10, 8)}</span>
+                  </Td>
+                  <Td mono>
+                    {(() => {
+                      const zero = /^0x0+$/.test(String(b.miner?.hash || ''));
+                      const signer = b._signer || (!zero ? b.miner?.hash : '');
+                      return signer ? (
+                        <LinkText tone="muted" onClick={() => navigateTo(`/address/${signer}`)} title={String(signer)}>
+                          {shortAddr(String(signer))}
+                        </LinkText>
+                      ) : <span className="text-txt-3">…</span>;
+                    })()}
+                  </Td>
+                  <Td right mono className="text-txt-2">{b.transaction_count ?? '--'}</Td>
+                  <Td right mono><GasBar pct={gasPct(b.gas_used, b.gas_limit)} /></Td>
+                  <Td right mono className="text-txt-3">{b.base_fee_per_gas ?? '--'}</Td>
+                  <Td right mono className="text-txt-3">{b.size ?? '--'}</Td>
+                </TRow>
+              ))
+            )}
+          </tbody>
+        </Table>
+      </Card>
+    </Page>
   );
 };
 
-const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: string) => void, onViewAddress: (a: string) => void, onViewBlock: (h: number) => void }) => {
+/* ---------------------------------- Txs list --------------------------------- */
+
+const TxsListView = ({
+  onViewTx,
+  onViewAddress,
+  onViewBlock,
+}: {
+  onViewTx: (h: string) => void;
+  onViewAddress: (a: string) => void;
+  onViewBlock: (h: number) => void;
+}) => {
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -705,70 +672,6 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
   const [nextParams, setNextParams] = useState<any | null>(null);
   const [prevStack, setPrevStack] = useState<any[]>([]);
 
-  const short = (s: string, a = 12, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
-
-  const fmtTDCAI = (weiLike: any, dp = 6) => {
-    try {
-      const wei = BigInt(String(weiLike ?? '0'));
-      const s = wei.toString();
-      const pad = s.length <= 18 ? '0'.repeat(18 - s.length + 1) + s : s;
-      const head = pad.slice(0, -18);
-      const tail = pad.slice(-18);
-      return `${head}.${tail.slice(0, dp)}`;
-    } catch {
-      return '--';
-    }
-  };
-
-  const fmtTDCAIParts = (weiLike: any, dp = 6) => {
-    const s = fmtTDCAI(weiLike, dp);
-    if (s === '--') return { i: '--', f: ''.padEnd(dp, '-') };
-    const [i, f0] = String(s).split('.');
-    return { i: i || '0', f: (f0 || '').padEnd(dp, '0').slice(0, dp) };
-  };
-
-  const methodLabel = (tx: any) => {
-    try {
-      // Prefer Blockscout decoded input (when contract is verified)
-      const di = tx?.decoded_input;
-      if (di) {
-        const mc = (di as any)?.method_call || (di as any)?.method;
-        if (mc && String(mc).trim()) return String(mc).trim();
-        const mid = (di as any)?.method_id;
-        if (mid && String(mid).trim()) return String(mid).trim();
-      }
-
-      // Some Blockscout instances also surface a top-level `method`
-      if (tx?.method && String(tx.method).trim()) return String(tx.method).trim();
-
-      if (tx?.created_contract?.hash) return 'CONTRACT CREATE';
-
-      const ri = String(tx?.raw_input || '');
-      if (!ri || ri === '0x' || ri.length < 10) return 'TRANSFER';
-      return ri.slice(0, 10);
-    } catch {
-      return '—';
-    }
-  };
-
-  const timeAgo = (iso?: string) => {
-    try {
-      if (!iso) return '--';
-      const ms = Date.now() - new Date(iso).getTime();
-      const s = Math.floor(ms / 1000);
-      if (s < 5) return 'just now';
-      if (s < 60) return `${s}s ago`;
-      const m = Math.floor(s / 60);
-      if (m < 60) return `${m}m ago`;
-      const h = Math.floor(m / 60);
-      if (h < 48) return `${h}h ago`;
-      const d = Math.floor(h / 24);
-      return `${d}d ago`;
-    } catch {
-      return '--';
-    }
-  };
-
   const setTxsUrl = (p: any | null, replace = false) => {
     try {
       const sp = new URLSearchParams();
@@ -783,7 +686,7 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
   useEffect(() => {
     let cancelled = false;
 
-    const buildUrl = () => {
+    const buildPath = () => {
       const sp = new URLSearchParams();
       sp.set('limit', '25');
       if (pageParams) {
@@ -792,25 +695,20 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
           sp.set(String(k), String(v));
         }
       }
-      return `/api/v2/transactions?${sp.toString()}`;
+      return `/transactions?${sp.toString()}`;
     };
 
     const load = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(buildUrl(), { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) {
-          setItems(j?.items || []);
-          setNextParams(j?.next_page_params || null);
-        }
-      } catch {}
-      finally { if (!cancelled) setLoading(false); }
+      setLoading(true);
+      const j = await bs(buildPath());
+      if (j && !cancelled) {
+        setItems(j?.items || []);
+        setNextParams(j?.next_page_params || null);
+      }
+      if (!cancelled) setLoading(false);
     };
 
     load();
-
     if (!pageParams) {
       const id = window.setInterval(load, 6000);
       return () => { cancelled = true; window.clearInterval(id); };
@@ -819,27 +717,15 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
   }, [pageParams]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
-    >
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="p-4 bg-gold-500/10 rounded-xl border border-gold-500/20 shadow-[0_0_20px_rgba(255,215,0,0.10)]">
-            <ArrowRightLeft className="w-8 h-8 text-gold-400" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-3xl md:text-4xl font-black tracking-widest">TRANSACTIONS <span className="glow-text text-gold-500">LIST</span></h1>
-            <div className="mt-2 text-xs font-mono text-gold-500/60">{loading ? 'Loading…' : (items ? `${items.length} tx(s)` : '—')}</div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            disabled={prevStack.length === 0}
-            onClick={() => {
+    <Page>
+      <PageTitle
+        title="Transactions"
+        sub={loading ? 'Loading…' : (items ? `${items.length} transactions on this page` : '—')}
+        right={
+          <Pager
+            canPrev={prevStack.length > 0}
+            canNext={!!nextParams}
+            onPrev={() => {
               if (!prevStack.length) return;
               const copy = prevStack.slice();
               const prev = copy.pop();
@@ -847,452 +733,283 @@ const TxsListView = ({ onViewTx, onViewAddress, onViewBlock }: { onViewTx: (h: s
               setTxsUrl(prev || null);
               setPageParams(prev || null);
             }}
-            className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${prevStack.length ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
-          >
-            PREV
-          </button>
-          <button
-            disabled={!nextParams}
-            onClick={() => {
+            onNext={() => {
               if (!nextParams) return;
-              setPrevStack(s => [...s, pageParams]);
+              setPrevStack((s) => [...s, pageParams]);
               setTxsUrl(nextParams);
               setPageParams(nextParams);
             }}
-            className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${nextParams ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
-          >
-            NEXT
-          </button>
-        </div>
-      </div>
+          />
+        }
+      />
 
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-        <div className="space-y-3">
-          {(items || []).map((tx: any) => (
-            <motion.div
-              key={tx.hash}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.16 }}
-              className="rounded-xl border border-gold-500/15 bg-dark-900/40 p-4"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-mono tracking-widest px-2 py-0.5 rounded border border-cyan-500/20 bg-cyan-500/10 text-cyan-300 max-w-[180px] truncate">
+      <Card>
+        <Table>
+          <thead>
+            <tr>
+              <Th>Tx hash</Th>
+              <Th>Method</Th>
+              <Th>Block</Th>
+              <Th>Age</Th>
+              <Th>From</Th>
+              <Th>To</Th>
+              <Th right>Value ({NATIVE_SYMBOL})</Th>
+              <Th right>Fee</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {items == null ? (
+              <SkeletonRows rows={12} cols={8} />
+            ) : items.length === 0 ? (
+              <tr><td colSpan={8}><Empty label="No transactions." /></td></tr>
+            ) : (
+              items.map((tx: any) => (
+                <TRow key={tx.hash}>
+                  <Td mono>
+                    <div className="flex items-center gap-1">
+                      <StatusBadge status={tx.status ?? tx.result} />
+                      <LinkText onClick={() => onViewTx(String(tx.hash))} title={String(tx.hash)}>
+                        {short(String(tx.hash), 10, 6)}
+                      </LinkText>
+                    </div>
+                  </Td>
+                  <Td>
+                    <Badge tone="neutral" className="max-w-[120px] overflow-hidden text-ellipsis" title={methodLabel(tx)}>
                       {methodLabel(tx)}
-                    </span>
-                    <button
-                      onClick={() => onViewTx(String(tx.hash))}
-                      className="text-left text-[11px] font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60 break-all"
-                    >
-                      {String(tx.hash)}
-                    </button>
-                  </div>
-
-                  <div className="mt-1 text-[10px] font-mono text-gold-500/45 flex flex-wrap gap-x-2 gap-y-1 items-center">
-                    <span>
-                      <span className="text-gold-500/35">block</span>{' '}
-                      {tx.block_number != null ? (
-                        <button
-                          onClick={() => onViewBlock(Number(tx.block_number))}
-                          className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                        >
-                          #{String(tx.block_number)}
-                        </button>
-                      ) : (
-                        <span className="text-gold-400">--</span>
-                      )}
-                    </span>
-                    <span>· pos {tx.position ?? '--'}</span>
-                    <span>· status {String(tx.status ?? tx.result ?? '--')}</span>
-                    <span>· conf {tx.confirmations ?? '--'}</span>
-                  </div>
-
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/40 flex flex-col gap-1">
-                    <div>
-                      <span className="text-gold-500/35">from</span>{' '}
-                      <button onClick={() => tx?.from?.hash && onViewAddress(String(tx.from.hash))} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">
-                        {short(String(tx.from?.hash || ''))}
-                      </button>
-                    </div>
-                    <div>
-                      <span className="text-gold-500/35">to</span>{' '}
-                      {tx?.created_contract?.hash ? (
-                        <button onClick={() => onViewAddress(String(tx.created_contract.hash))} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">
-                          {short(String(tx.created_contract.hash))}
-                        </button>
-                      ) : (
-                        <button onClick={() => tx?.to?.hash && onViewAddress(String(tx.to.hash))} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">
-                          {short(String(tx.to?.hash || ''))}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="shrink-0 text-right">
-                  <div className="text-[10px] font-mono text-gold-500/60">{timeAgo(String(tx.timestamp || ''))}</div>
-                  <div className="text-[10px] font-mono text-gold-500/35">{String(tx.timestamp || '').replace('T', ' ').replace('Z', '')}</div>
-
-                  <div className="mt-3 grid gap-3 tabular-nums">
-                    <div>
-                      <div className="text-[10px] font-mono tracking-widest text-gold-500/45">VALUE</div>
-                      <div className="mt-1 text-sm font-mono text-cyan-200/90">
-                        {(() => {
-                          const p = fmtTDCAIParts(tx.value, 6);
-                          return (
-                            <span>
-                              <span className="inline-block text-right w-[72px]">{p.i}</span>
-                              <span className="text-cyan-200/40">.</span>
-                              <span className="inline-block w-[52px]">{p.f}</span>
-                              <span className="ml-1 text-cyan-200/50">tDCAI</span>
-                            </span>
-                          );
-                        })()}
-                      </div>
-                      <div className="text-[10px] font-mono text-gold-500/35">{String(tx.value ?? '0')} wei</div>
-                    </div>
-
-                    <div>
-                      <div className="text-[10px] font-mono tracking-widest text-gold-500/45">FEE</div>
-                      <div className="mt-1 text-sm font-mono text-gold-500/90">
-                        {(() => {
-                          const p = fmtTDCAIParts(tx.fee?.value ?? tx.fee ?? '0', 6);
-                          return (
-                            <span>
-                              <span className="inline-block text-right w-[72px]">{p.i}</span>
-                              <span className="text-gold-500/50">.</span>
-                              <span className="inline-block w-[52px]">{p.f}</span>
-                              <span className="ml-1 text-gold-500/50">tDCAI</span>
-                            </span>
-                          );
-                        })()}
-                      </div>
-                      <div className="text-[10px] font-mono text-gold-500/35">{String(tx.fee?.value ?? tx.fee ?? '0')} wei</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          ))}
-
-          {!loading && items && items.length === 0 ? (
-            <div className="text-xs font-mono text-gold-500/60">No transactions.</div>
-          ) : null}
-        </div>
-      </div>
-    </motion.div>
+                    </Badge>
+                  </Td>
+                  <Td mono>
+                    {tx.block_number != null ? (
+                      <LinkText tone="muted" onClick={() => onViewBlock(Number(tx.block_number))}>#{tx.block_number}</LinkText>
+                    ) : <span className="text-txt-3">--</span>}
+                  </Td>
+                  <Td mono className="text-txt-3" title={String(tx.timestamp || '')}>{timeAgo(tx.timestamp)}</Td>
+                  <Td mono>
+                    <LinkText tone="muted" onClick={() => tx?.from?.hash && onViewAddress(String(tx.from.hash))} title={tx?.from?.hash}>
+                      {shortAddr(String(tx?.from?.hash || ''))}
+                    </LinkText>
+                  </Td>
+                  <Td mono>
+                    {tx?.created_contract?.hash ? (
+                      <LinkText tone="muted" onClick={() => onViewAddress(String(tx.created_contract.hash))} title={`contract ${tx.created_contract.hash}`}>
+                        <Badge tone="warn" className="mr-1">create</Badge>{shortAddr(String(tx.created_contract.hash))}
+                      </LinkText>
+                    ) : (
+                      <LinkText tone="muted" onClick={() => tx?.to?.hash && onViewAddress(String(tx.to.hash))} title={tx?.to?.hash}>
+                        {shortAddr(String(tx?.to?.hash || ''))}
+                      </LinkText>
+                    )}
+                  </Td>
+                  <Td right mono className="text-gold">{fmtWei(tx.value)}</Td>
+                  <Td right mono className="text-txt-3">{fmtWei(tx.fee?.value ?? tx.fee ?? '0')}</Td>
+                </TRow>
+              ))
+            )}
+          </tbody>
+        </Table>
+      </Card>
+    </Page>
   );
 };
 
-const BlockView = ({ block, onBack, onViewTx, onViewAddress }: { block: any, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void, key?: string }) => {
+/* --------------------------------- Block view -------------------------------- */
+
+const BlockView = ({
+  block,
+  onBack,
+  onViewTx,
+  onViewAddress,
+  onViewBlock,
+}: {
+  block: any;
+  onBack: () => void;
+  onViewTx: (h: string) => void;
+  onViewAddress: (a: string) => void;
+  onViewBlock: (h: number) => void;
+}) => {
   const [details, setDetails] = useState<any>(null);
   const [blockTxs, setBlockTxs] = useState<any[]>([]);
-  const [copyToast, setCopyToast] = useState<string | null>(null);
-
-  const timeAgo = (iso?: string) => {
-    try {
-      if (!iso) return '';
-      const ms = Date.now() - new Date(iso).getTime();
-      const s = Math.floor(ms / 1000);
-      if (s < 5) return 'just now';
-      if (s < 60) return `${s}s ago`;
-      const m = Math.floor(s / 60);
-      if (m < 60) return `${m}m ago`;
-      const h = Math.floor(m / 60);
-      if (h < 48) return `${h}h ago`;
-      const d = Math.floor(h / 24);
-      return `${d}d ago`;
-    } catch {
-      return '';
-    }
-  };
 
   useEffect(() => {
     let cancelled = false;
 
-    const fmt = (weiLike: any, decimals = 18, dp = 6) => {
-      try {
-        const wei = BigInt(String(weiLike ?? '0'));
-        const neg = wei < 0n;
-        const x = neg ? -wei : wei;
-        const s = x.toString();
-        const head = s.length > decimals ? s.slice(0, -decimals) : '0';
-        const tail = s.length > decimals ? s.slice(-decimals) : s.padStart(decimals, '0');
-        return (neg ? '-' : '') + head + '.' + tail.slice(0, dp);
-      } catch {
-        return '--';
-      }
-    };
-
-    const short = (addr: string) => (addr ? (addr.slice(0, 6) + '…' + addr.slice(-4)) : '--');
-
     const load = async () => {
       try {
         window.scrollTo(0, 0);
+        const b = await bs(`/blocks/${block.height}`);
+        if (!b) return;
 
-        const res = await fetch(`/api/v2/blocks/${block.height}`, { cache: 'no-store' });
-        const b = await res.json();
+        const head = await rpcBlockNumber();
 
-        // head block for confirmations
-        let head: number | null = null;
-        try {
-          const headRes = await fetch('/rpc1/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
-          });
-          const headJson = await headRes.json();
-          const hx = headJson?.result;
-          if (typeof hx === 'string' && hx.startsWith('0x')) head = parseInt(hx, 16);
-        } catch {}
-
-        // clique signer
         let signer = '';
         try {
           const hexNum = '0x' + Number(block.height).toString(16);
-          const snapRes = await fetch('/rpc1/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'clique_getSnapshot', params: [hexNum] }),
-          });
-          const snap = await snapRes.json();
-          signer = (snap?.result?.recents?.[String(block.height)] || '').toLowerCase();
+          const snap = await rpc('clique_getSnapshot', [hexNum]);
+          signer = (snap?.recents?.[String(block.height)] || '').toLowerCase();
         } catch {}
 
         const conf = head != null ? Math.max(0, head - Number(b.height)) : null;
         const status = conf != null && conf <= 0 ? 'PENDING' : 'FINALIZED';
 
-        const details = {
+        const d = {
           height: b.height,
           hash: b.hash,
           status,
           confirmations: conf != null ? conf : '--',
           size: b.size != null ? String(b.size) : '--',
           txCount: Number(b.transaction_count ?? 0),
-          time: b.timestamp ? new Date(b.timestamp).toLocaleString('en-GB', { hour12: false }) : '--',
+          timestamp: b.timestamp,
           validator: signer || '',
-          miner: signer ? short(signer) : '--',
-          reward: fmt(b.transaction_fees ?? '0', 18, 6),
+          reward: fmtWei(b.transaction_fees ?? '0'),
           gasUsed: Number(b.gas_used ?? 0),
           gasLimit: Number(b.gas_limit ?? 0),
+          baseFee: b.base_fee_per_gas ?? '--',
           parentHash: b.parent_hash ?? '--',
           stateRoot: b.state_root ?? '--',
         };
 
-        const txRes = await fetch(`/api/v2/blocks/${block.height}/transactions?limit=12`, { cache: 'no-store' });
-        const txData = await txRes.json();
+        const txData = await bs(`/blocks/${block.height}/transactions?limit=25`);
         const txs = (txData?.items || []).map((tx: any) => ({
           hash: tx.hash,
           from: tx.from?.hash || tx.from || '--',
           to: tx.to?.hash || tx.to || '--',
-          value: fmt(tx.value ?? '0', 18, 6),
-          fee: fmt(tx.fee?.value ?? tx.fee ?? '0', 18, 6),
+          value: fmtWei(tx.value ?? '0'),
+          fee: fmtWei(tx.fee?.value ?? tx.fee ?? '0'),
           timestamp: tx.timestamp,
-          time: tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '--',
+          status: tx.status ?? tx.result,
         }));
 
         if (!cancelled) {
-          setDetails(details);
+          setDetails(d);
           setBlockTxs(txs);
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     };
 
     load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [block]);
 
-  if (!details) return null;
+  if (!details) {
+    return (
+      <Page>
+        <PageTitle title={`Block #${block?.height ?? ''}`} sub="Loading…" onBack={onBack} backLabel="Back" />
+        <Card><Table><tbody><SkeletonRows rows={8} cols={2} /></tbody></Table></Card>
+      </Page>
+    );
+  }
+
+  const h = Number(details.height);
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }} 
-      animate={{ opacity: 1, y: 0 }} 
-      exit={{ opacity: 0, y: -20 }} 
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
-    >
-       <AnimatePresence>
-        {copyToast ? (
-          <motion.div
-            key="copytoast-block"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.18 }}
-            className="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-lg bg-dark-900/80 border border-cyan-500/30 backdrop-blur-md text-xs font-mono text-cyan-300 shadow-[0_0_20px_rgba(0,240,255,0.15)]"
-          >
-            {copyToast}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-     <button 
-        onClick={onBack} 
-        className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 font-mono text-sm mb-8 group transition-colors cursor-pointer"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> 
-        BACK TO STREAM
-      </button>
-
-      <div className="mb-8 flex items-center gap-4">
-        <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/30 shadow-[0_0_20px_rgba(0,240,255,0.2)]">
-          <Layers className="w-8 h-8 text-cyan-400" />
-        </div>
-        <div>
-          <h1 className="text-3xl md:text-4xl font-black tracking-widest">
-            BLOCK <span className="glow-text-cyan text-cyan-400">#{details.height}</span>
-          </h1>
-          <div className="flex items-center gap-3 mt-2">
-            <div className="flex items-center gap-1 text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">
-              <CheckCircle2 className="w-3 h-3" /> {details.status}
-            </div>
-            <span className="text-xs font-mono text-gold-500/50">{details.confirmations} Block Confirmations</span>
+    <Page>
+      <PageTitle
+        title="Block"
+        accent={`#${details.height}`}
+        onBack={onBack}
+        backLabel="Back"
+        sub={
+          <span className="inline-flex items-center gap-2 flex-wrap">
+            {details.status === 'FINALIZED' ? <Badge tone="ok">finalized</Badge> : <Badge tone="warn">pending</Badge>}
+            <span className="font-mono">{details.confirmations} confirmations</span>
+            <span className="font-mono text-txt-3">{fmtStamp(details.timestamp)} · {timeAgo(details.timestamp)}</span>
+          </span>
+        }
+        right={
+          <div className="flex items-center gap-1.5">
+            <Btn onClick={() => Number.isFinite(h) && onViewBlock(h - 1)} title="Previous block">← #{h - 1}</Btn>
+            <Btn onClick={() => Number.isFinite(h) && onViewBlock(h + 1)} title="Next block">#{h + 1} →</Btn>
           </div>
+        }
+      />
+
+      <Card className="mb-4">
+        <CardHead title="Overview" />
+        <div className="px-4 py-1">
+          <KV label="Block hash" copy={String(details.hash)}><span className="font-mono text-cyan">{details.hash}</span></KV>
+          <KV label="Signer (validator)" copy={details.validator || undefined}>
+            {details.validator ? (
+              <LinkText onClick={() => onViewAddress(String(details.validator))} className="text-[12px]">{details.validator}</LinkText>
+            ) : '--'}
+          </KV>
+          <KV label="Transactions"><span className="font-mono">{details.txCount}</span></KV>
+          <KV label="Fees collected"><span className="font-mono text-gold">{details.reward} {NATIVE_SYMBOL}</span></KV>
+          <KV label="Gas used">
+            <span className="inline-flex items-center gap-3 font-mono">
+              {fmtNum(details.gasUsed)} / {fmtNum(details.gasLimit)}
+              <GasBar pct={gasPct(details.gasUsed, details.gasLimit)} />
+            </span>
+          </KV>
+          <KV label="Base fee"><span className="font-mono">{details.baseFee} wei</span></KV>
+          <KV label="Size"><span className="font-mono">{details.size} bytes</span></KV>
+          <KV label="Parent hash" copy={String(details.parentHash)}>
+            <LinkText tone="muted" onClick={() => onViewBlock(h - 1)} className="text-[12px]">{details.parentHash}</LinkText>
+          </KV>
+          <KV label="State root"><span className="font-mono text-txt-2">{details.stateRoot}</span></KV>
         </div>
-      </div>
+      </Card>
 
-      <div className="glow-box-cyan bg-dark-800/80 backdrop-blur-xl p-6 md:p-8 rounded-2xl border-t-4 border-t-cyan-500 mb-12">
-        <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 mb-6 text-cyan-400">
-          <Box className="w-5 h-5" />
-          OVERVIEW
-        </h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
-          <DetailRow label="BLOCK HASH" value={details.hash} isCyan onCopy={() => copyToClipboard(String(details.hash))} />
-          <DetailRow label="TIMESTAMP" value={details.time} />
-          <div className="flex flex-col gap-1 border-b border-gold-500/10 pb-4">
-            <span className="text-xs font-mono text-gold-500/50">VALIDATOR</span>
-            <div className="flex items-start justify-between gap-3">
-              {details?.validator ? (
-                <div className="min-w-0">
-                  <button
-                    onClick={() => onViewAddress(String(details.validator))}
-                    className="text-left text-sm font-mono text-cyan-400 glow-text-cyan hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                  >
-                    {details?.miner || String(details.validator).slice(0, 6) + '…' + String(details.validator).slice(-4)}
-                  </button>
-                  <button
-                    onClick={() => onViewAddress(String(details.validator))}
-                    className="mt-1 block text-left text-[10px] font-mono text-gold-500/50 hover:text-cyan-300 underline decoration-gold-500/10 hover:decoration-cyan-400/60 break-all"
-                  >
-                    {String(details.validator)}
-                  </button>
-                </div>
-              ) : (
-                <div className="text-sm font-mono text-gold-400">--</div>
-              )}
-
-              {details?.validator ? (
-                <button
-                  onClick={() => copyToClipboard(String(details.validator))}
-                  className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded"
-                >
-                  ⧉
-                </button>
-              ) : null}
-            </div>
-          </div>
-          <DetailRow label="BLOCK REWARD" value={`${details.reward} DCAI`} />
-          <DetailRow label="TRANSACTIONS" value={details.txCount} />
-          <DetailRow label="SIZE" value={details.size} />
-          <DetailRow label="GAS USED" value={`${details.gasUsed.toLocaleString()} (${((details.gasUsed / details.gasLimit) * 100).toFixed(2)}%)`} />
-          <DetailRow label="GAS LIMIT" value={details.gasLimit.toLocaleString()} />
-          <DetailRow label="PARENT HASH" value={details.parentHash} onCopy={() => copyToClipboard(String(details.parentHash))} />
-          <DetailRow label="STATE ROOT" value={details.stateRoot} />
-        </div>
-      </div>
-
-      <div className="glow-box bg-dark-800/50 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2">
-            <ArrowRightLeft className="w-5 h-5 text-gold-500" />
-            TRANSACTIONS ({details.txCount})
-          </h2>
-        </div>
-
-        <div className="space-y-3">
-          {blockTxs.map((tx, idx) => (
-            <motion.div
-              key={tx.hash}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.05 }}
-              className="group flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg border border-gold-500/10 hover:border-cyan-500/40 bg-dark-900/50 transition-colors"
-            >
-              <div className="flex items-center gap-4 mb-2 sm:mb-0">
-                <div className="p-2 bg-gold-500/10 rounded-md group-hover:bg-cyan-500/20 transition-colors">
-                  <Hash className="w-4 h-4 text-gold-500 group-hover:text-cyan-400 transition-colors" />
-                </div>
-                <div>
-                  <button
-                    onClick={() => onViewTx(String(tx.hash))}
-                    className="text-left text-[11px] font-mono text-cyan-400 break-all w-44 sm:w-72 leading-4 hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                  >
-                    {tx.hash}
-                  </button>
-                  <div className="text-[10px] font-mono text-gold-500/50">{tx.time}{tx.timestamp ? (' · ' + timeAgo(tx.timestamp)) : ""}</div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 flex-1 px-3">
-                <div className="flex items-center gap-2 w-28">
-  <button onClick={() => {
-    const a = (tx as any)?.from?.hash || (tx as any)?.from;
-    if (a) onViewAddress(String(a));
-  }} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate cursor-pointer underline decoration-gold-500/20 hover:decoration-cyan-400/60">{String((tx as any)?.from?.hash || (tx as any)?.from || '--')}</button>
-  <button onClick={async () => {
-    const ok = await copyToClipboard(tx.from);
-    if (ok) {
-      setCopyToast('Copied FROM: ' + tx.from);
-      setTimeout(() => setCopyToast(null), 1200);
-    }
-  }} className="w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
-</div>
-                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent relative">
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-cyan-400 rounded-full blur-[1px] shadow-[0_0_8px_#00F0FF]" />
-                </div>
-                <div className="flex items-center gap-2 w-28 justify-end">
-  <button onClick={() => {
-    const a = (tx as any)?.to?.hash || (tx as any)?.to;
-    if (a) onViewAddress(String(a));
-  }} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate cursor-pointer underline decoration-gold-500/20 hover:decoration-cyan-400/60">{String((tx as any)?.to?.hash || (tx as any)?.to || '--')}</button>
-  <button onClick={async () => {
-    const ok = await copyToClipboard(tx.to);
-    if (ok) {
-      setCopyToast('Copied TO: ' + tx.to);
-      setTimeout(() => setCopyToast(null), 1200);
-    }
-  }} className="w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
-</div>
-              </div>
-
-              <div className="text-right mt-2 sm:mt-0">
-                <div className="text-sm font-mono font-bold text-gold-500 glow-text">{tx.value} DCAI</div>
-                <div className="text-[10px] font-mono text-gold-500/40">FEE: {tx.fee}</div>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-        
-        <div className="mt-6 text-center">
-          <button className="text-xs font-mono text-cyan-400 hover:text-cyan-300 border border-cyan-500/30 hover:border-cyan-400 px-6 py-2 rounded transition-colors cursor-pointer">
-            LOAD MORE TRANSACTIONS
-          </button>
-        </div>
-      </div>
-    </motion.div>
+      <Card>
+        <CardHead title={`Transactions (${details.txCount})`} />
+        {blockTxs.length === 0 ? (
+          <Empty label="No transactions in this block." />
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Tx hash</Th>
+                <Th>From</Th>
+                <Th>To</Th>
+                <Th right>Value ({NATIVE_SYMBOL})</Th>
+                <Th right>Fee</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {blockTxs.map((tx: any) => (
+                <TRow key={tx.hash}>
+                  <Td mono>
+                    <div className="flex items-center gap-1">
+                      <StatusBadge status={tx.status} />
+                      <LinkText onClick={() => onViewTx(String(tx.hash))} title={tx.hash}>{short(tx.hash, 12, 8)}</LinkText>
+                    </div>
+                  </Td>
+                  <Td mono>
+                    <LinkText tone="muted" onClick={() => tx.from !== '--' && onViewAddress(String(tx.from))} title={tx.from}>
+                      {shortAddr(String(tx.from))}
+                    </LinkText>
+                  </Td>
+                  <Td mono>
+                    <LinkText tone="muted" onClick={() => tx.to !== '--' && onViewAddress(String(tx.to))} title={tx.to}>
+                      {shortAddr(String(tx.to))}
+                    </LinkText>
+                  </Td>
+                  <Td right mono className="text-gold">{tx.value}</Td>
+                  <Td right mono className="text-txt-3">{tx.fee}</Td>
+                </TRow>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+    </Page>
   );
 };
 
-const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, onBack: () => void, onViewBlock: (h: number) => void, onViewAddress: (a: string) => void }) => {
+/* ----------------------------------- Tx view --------------------------------- */
+
+const TxView = ({
+  hash,
+  onBack,
+  onViewBlock,
+  onViewAddress,
+}: {
+  hash: string;
+  onBack: () => void;
+  onViewBlock: (h: number) => void;
+  onViewAddress: (a: string) => void;
+}) => {
   const [tx, setTx] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [copyToast, setCopyToast] = useState<string | null>(null);
   const [tab, setTab] = useState<'overview' | 'logs' | 'transfers'>('overview');
   const [showInput, setShowInput] = useState<boolean>(false);
   const [logs, setLogs] = useState<any[] | null>(null);
@@ -1301,592 +1018,278 @@ const TxView = ({ hash, onBack, onViewBlock, onViewAddress }: { hash: string, on
   const [transfers, setTransfers] = useState<any[] | null>(null);
   const [transfersLoading, setTransfersLoading] = useState<boolean>(false);
 
-  const fmtTDCAI = (weiLike: any, dp = 6) => {
-    try {
-      const wei = BigInt(String(weiLike ?? '0'));
-      const s = wei.toString();
-      const pad = s.length <= 18 ? '0'.repeat(18 - s.length + 1) + s : s;
-      const head = pad.slice(0, -18);
-      const tail = pad.slice(-18);
-      return `${head}.${tail.slice(0, dp)}`;
-    } catch {
-      return '--';
-    }
-  };
-
-  const short = (addr: string) => (addr ? (addr.slice(0, 6) + '…' + addr.slice(-4)) : '--');
-
-  const EVENT_SIGS: Record<string, string> = {
-    // ERC-20 / ERC-721
-    '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef': 'Transfer(address,address,uint256)',
-    '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925': 'Approval(address,address,uint256)',
-  };
-
-  const eventName = (topic0?: string) => {
-    if (!topic0) return 'Unknown event';
-    const k = String(topic0).toLowerCase();
-    return EVENT_SIGS[k] || 'Unknown event';
-  };
-
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/v2/transactions/${hash}`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const data = await res.json();
-        if (!cancelled) setTx(data);
-      } catch {
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      setLoading(true);
+      const data = await bs(`/transactions/${hash}`);
+      if (data && !cancelled) setTx(data);
+      if (!cancelled) setLoading(false);
     };
     load();
     return () => { cancelled = true; };
   }, [hash]);
 
-  // Reset tab payloads when hash changes
   useEffect(() => {
     setLogs(null);
     setTransfers(null);
     setLogOpen({});
+    setTab('overview');
   }, [hash]);
 
-  // Lazy-load Logs / Token Transfers only when the tab is opened
   useEffect(() => {
     let cancelled = false;
     const loadLogs = async () => {
-      try {
-        setLogsLoading(true);
-        const res = await fetch(`/api/v2/transactions/${hash}/logs`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setLogs(j?.items || []);
-      } catch {}
-      finally { if (!cancelled) setLogsLoading(false); }
+      setLogsLoading(true);
+      const j = await bs(`/transactions/${hash}/logs`);
+      if (j && !cancelled) setLogs(j?.items || []);
+      if (!cancelled) setLogsLoading(false);
     };
     const loadTransfers = async () => {
-      try {
-        setTransfersLoading(true);
-        const res = await fetch(`/api/v2/transactions/${hash}/token-transfers`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setTransfers(j?.items || []);
-      } catch {}
-      finally { if (!cancelled) setTransfersLoading(false); }
+      setTransfersLoading(true);
+      const j = await bs(`/transactions/${hash}/token-transfers`);
+      if (j && !cancelled) setTransfers(j?.items || []);
+      if (!cancelled) setTransfersLoading(false);
     };
 
     if (tab === 'logs' && logs == null && !logsLoading) loadLogs();
     if (tab === 'transfers' && transfers == null && !transfersLoading) loadTransfers();
-
     return () => { cancelled = true; };
   }, [tab, hash]);
 
-
-  const copy = async (label: string, value: string) => {
-    const ok = await copyToClipboard(value);
-    if (ok) {
-      setCopyToast(`Copied ${label}: ${value}`);
-      setTimeout(() => setCopyToast(null), 1400);
-    }
-  };
-
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
-    >
-      <AnimatePresence>
-        {copyToast ? (
-          <motion.div
-            key="copytoast-tx"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.18 }}
-            className="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-lg bg-dark-900/80 border border-cyan-500/30 backdrop-blur-md text-xs font-mono text-cyan-300 shadow-[0_0_20px_rgba(0,240,255,0.15)]"
-          >
-            {copyToast}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+    <Page>
+      <PageTitle
+        title="Transaction"
+        onBack={onBack}
+        backLabel="Back"
+        sub={
+          <span className="inline-flex items-center gap-2 flex-wrap">
+            <StatusBadge status={tx?.status ?? (loading ? 'pending' : '--')} />
+            <span className="font-mono break-all">{hash}</span>
+            <CopyBtn value={hash} label="hash" />
+          </span>
+        }
+      />
 
-      <button
-        onClick={onBack}
-        className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 font-mono text-sm mb-8 group transition-colors cursor-pointer"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-        BACK TO STREAM
-      </button>
-
-      <div className="mb-6 flex items-center gap-4">
-        <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/30 shadow-[0_0_20px_rgba(0,240,255,0.2)] relative overflow-hidden">
-          <motion.div
-            className="absolute inset-0"
-            animate={{ opacity: [0.05, 0.16, 0.05] }}
-            transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
-            style={{ background: 'radial-gradient(circle at 30% 30%, rgba(0,240,255,0.18), transparent 60%)' }}
-          />
-          <Activity className="w-8 h-8 text-cyan-400 relative" />
-        </div>
-        <div className="min-w-0">
-          <h1 className="text-3xl md:text-4xl font-black tracking-widest">
-            TRANSACTION <span className="glow-text-cyan text-cyan-400">DETAILS</span>
-          </h1>
-          <div className="mt-2 flex items-center gap-3">
-            <div className={`text-xs font-mono px-2 py-1 rounded border ${tx?.status === 'ok' ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' : 'text-rose-300 bg-rose-500/10 border-rose-500/20'}`}>
-              {tx?.status ?? (loading ? 'loading' : '--')}
-            </div>
-            <div className="text-xs font-mono text-gold-500/50">{tx?.confirmations != null ? `${tx.confirmations} confirmations` : ''}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mb-8 flex flex-wrap gap-2">
-        {[
-          { k: 'overview', label: 'OVERVIEW' },
-          { k: 'logs', label: 'LOGS' },
-          { k: 'transfers', label: 'TOKEN TRANSFERS' },
-        ].map((t) => (
-          <button
-            key={t.k}
-            onClick={() => setTab(t.k as any)}
-            className={`relative px-4 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${tab === t.k ? 'text-cyan-200 border-cyan-500/50 bg-cyan-500/10' : 'text-gold-500/60 border-gold-500/15 hover:border-cyan-500/30 hover:text-cyan-300'}`}
-          >
-            {tab === t.k && (
-              <motion.span
-                layoutId="tx-tab"
-                className="absolute inset-0 rounded-lg border border-cyan-400/30"
-                initial={false}
-                transition={{ type: 'spring', stiffness: 240, damping: 26 }}
-              />
-            )}
-            <span className="relative">{t.label}</span>
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          { k: 'overview', label: 'Overview' },
+          { k: 'logs', label: 'Logs' },
+          { k: 'transfers', label: 'Token transfers' },
+        ]}
+        active={tab}
+        onChange={(k) => setTab(k as any)}
+      />
 
       {tab === 'overview' ? (
         <>
-      <div className="glow-box-cyan bg-dark-800/80 backdrop-blur-xl p-6 md:p-8 rounded-2xl border-t-4 border-t-cyan-500 mb-10 relative overflow-hidden">
-        <motion.div
-          className="absolute -right-24 -top-24 w-64 h-64 rounded-full"
-          animate={{ opacity: [0.15, 0.3, 0.15], scale: [1, 1.05, 1] }}
-          transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
-          style={{ background: 'radial-gradient(circle, rgba(0,240,255,0.18), transparent 60%)' }}
-        />
-
-        <div className="relative z-10">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
-              <Info className="w-5 h-5" /> OVERVIEW
-            </h2>
-            <button
-              onClick={() => copy('HASH', tx?.hash || hash)}
-              className="text-xs font-mono text-cyan-300 hover:text-cyan-200 border border-cyan-500/30 hover:border-cyan-400 px-3 py-1.5 rounded transition-colors"
-            >
-              COPY HASH
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
-            <DetailRow label="HASH" value={tx?.hash || hash} isCyan />
-            <DetailRow label="RESULT" value={tx?.result || '--'} />
-            <div className="flex flex-col gap-1 border-b border-gold-500/10 pb-4">
-              <span className="text-xs font-mono text-gold-500/50">BLOCK</span>
-              <div className="flex items-start justify-between gap-3">
+          <Card className="mb-4">
+            <CardHead title="Overview" />
+            <div className="px-4 py-1">
+              <KV label="Status">
+                <span className="inline-flex items-center gap-2">
+                  <StatusBadge status={tx?.status} />
+                  <span className="font-mono text-txt-3">{tx?.confirmations != null ? `${fmtNum(tx.confirmations)} confirmations` : ''}</span>
+                </span>
+              </KV>
+              <KV label="Block">
                 {(tx?.block_number ?? tx?.block) != null ? (
-                  <button
-                    onClick={() => onViewBlock(Number(tx?.block_number ?? tx?.block))}
-                    className="text-left text-sm font-mono break-all text-cyan-400 glow-text-cyan hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                  >
-                    #{String(tx?.block_number ?? tx?.block)}
-                  </button>
-                ) : (
-                  <div className="text-sm font-mono break-all text-gold-400">--</div>
-                )}
-              </div>
-            </div>
-            <DetailRow label="POSITION" value={tx?.position ?? '--'} />
-            <div className="flex flex-col gap-2 border-b border-gold-500/10 pb-4">
-              <span className="text-xs font-mono text-gold-500/50">FROM</span>
-              <div className="flex items-start justify-between gap-3">
+                  <LinkText onClick={() => onViewBlock(Number(tx?.block_number ?? tx?.block))}>#{String(tx?.block_number ?? tx?.block)}</LinkText>
+                ) : '--'}
+              </KV>
+              <KV label="Timestamp"><span className="font-mono">{fmtStamp(tx?.timestamp)} · {timeAgo(tx?.timestamp)}</span></KV>
+              <KV label="From" copy={tx?.from?.hash}>
                 {tx?.from?.hash ? (
-                  <button
-                    onClick={() => onViewAddress(String(tx.from.hash))}
-                    className="text-left text-sm font-mono break-all text-cyan-400 glow-text-cyan hover:text-cyan-300 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                  >
-                    {String(tx.from.hash)}
-                  </button>
-                ) : (
-                  <div className="text-sm font-mono break-all text-gold-400">--</div>
-                )}
-                {tx?.from?.hash ? (
-                  <button onClick={() => copy('FROM', String(tx.from.hash))} className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
-                ) : null}
-              </div>
+                  <LinkText onClick={() => onViewAddress(String(tx.from.hash))} className="text-[12px]">{String(tx.from.hash)}</LinkText>
+                ) : '--'}
+              </KV>
+              <KV label={tx?.created_contract?.hash ? 'Created contract' : 'To'} copy={tx?.created_contract?.hash || tx?.to?.hash}>
+                {tx?.created_contract?.hash ? (
+                  <LinkText onClick={() => onViewAddress(String(tx.created_contract.hash))} className="text-[12px]">{String(tx.created_contract.hash)}</LinkText>
+                ) : tx?.to?.hash ? (
+                  <LinkText onClick={() => onViewAddress(String(tx.to.hash))} className="text-[12px]">{String(tx.to.hash)}</LinkText>
+                ) : '--'}
+              </KV>
+              <KV label="Value"><span className="font-mono text-gold">{fmtWei(tx?.value)} {NATIVE_SYMBOL}</span></KV>
+              <KV label="Fee">
+                <span className="font-mono">{fmtWei(tx?.fee?.value ?? tx?.fee ?? '0')} {NATIVE_SYMBOL} <span className="text-txt-3">({String(tx?.fee?.value ?? tx?.fee ?? '0')} wei)</span></span>
+              </KV>
+              <KV label="Gas used / price">
+                <span className="font-mono">{tx?.gas_used != null ? fmtNum(tx.gas_used) : '--'} <span className="text-txt-3">@ {tx?.gas_price ?? tx?.max_fee_per_gas ?? '--'} wei</span></span>
+              </KV>
+              <KV label="Nonce / position"><span className="font-mono">{tx?.nonce ?? '--'} / {tx?.position ?? '--'}</span></KV>
+              <KV label="Method"><Badge tone="neutral">{methodLabel(tx)}</Badge></KV>
             </div>
+          </Card>
 
-            <div className="flex flex-col gap-2 border-b border-gold-500/10 pb-4">
-              <span className="text-xs font-mono text-gold-500/50">TO</span>
-              <div className="flex items-start justify-between gap-3">
-                {tx?.to?.hash ? (
-                  <button
-                    onClick={() => onViewAddress(String(tx.to.hash))}
-                    className="text-left text-sm font-mono break-all text-gold-400 hover:text-cyan-300 underline decoration-gold-500/20 hover:decoration-cyan-400/60"
-                  >
-                    {String(tx.to.hash)}
-                  </button>
-                ) : (
-                  <div className="text-sm font-mono break-all text-gold-400">--</div>
-                )}
-                {tx?.to?.hash ? (
-                  <button onClick={() => copy('TO', String(tx.to.hash))} className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
-                ) : null}
-              </div>
-            </div>
-            <DetailRow label="VALUE" value={`${fmtTDCAI(tx?.value)} tDCAI`} isCyan />
-            <DetailRow label="FEE (wei)" value={tx?.fee?.value ?? tx?.fee ?? '--'} />
-            <DetailRow label="GAS USED" value={tx?.gas_used ?? '--'} />
-            <DetailRow label="GAS PRICE" value={tx?.gas_price ?? tx?.max_fee_per_gas ?? '--'} />
-            <DetailRow label="NONCE" value={tx?.nonce ?? '--'} />
-            <DetailRow label="METHOD" value={tx?.method ?? tx?.decoded_input?.method_call ?? '--'} />
-          </div>
-        </div>
-      </div>
-
-      <div className="-mt-6 mb-10 flex flex-wrap gap-2">
-        <button
-          onClick={() => tx?.from?.hash && onViewAddress(String(tx.from.hash))}
-          className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors"
-        >
-          OPEN FROM
-        </button>
-        <button
-          onClick={() => tx?.to?.hash && onViewAddress(String(tx.to.hash))}
-          className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors"
-        >
-          OPEN TO
-        </button>
-        {(tx?.block_number ?? tx?.block) != null ? (
-          <button
-            onClick={() => onViewBlock(Number(tx?.block_number ?? tx?.block))}
-            className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors"
-          >
-            OPEN BLOCK
-          </button>
-        ) : null}
-      </div>
-
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30 mb-10 overflow-hidden relative">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2">
-            <Database className="w-5 h-5 text-gold-500" /> INPUT DATA
-          </h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowInput((v) => !v)}
-              className="text-xs font-mono text-cyan-300 hover:text-cyan-200 border border-cyan-500/25 hover:border-cyan-400 px-3 py-1.5 rounded transition-colors"
-            >
-              {showInput ? 'COLLAPSE' : 'EXPAND'}
-            </button>
-            <button
-              onClick={() => copy('INPUT', String(tx?.raw_input ?? ''))}
-              className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-3 py-1.5 rounded transition-colors"
-            >
-              COPY
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-3 text-[11px] font-mono text-gold-500/60">
-          {tx?.decoded_input?.method_call ? (<>Decoded: <span className="text-cyan-300">{tx.decoded_input.method_call}</span></>) : (<>Decoded: <span className="text-gold-500/40">(pending)</span></>)}
-        </div>
-
-        <AnimatePresence initial={false}>
-          {showInput ? (
-            <motion.div
-              key="input-expanded"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.28, ease: 'easeInOut' }}
-              className="mt-4 relative"
-            >
-              <div className="relative rounded-lg border border-cyan-500/20 bg-dark-900/60 p-4 overflow-hidden">
-                <motion.div
-                  className="absolute left-0 top-0 w-full h-[2px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent"
-                  animate={{ x: ['-100%', '200%'] }}
-                  transition={{ duration: 1.6, repeat: Infinity, ease: 'linear' }}
-                />
-                <div className="text-[10px] font-mono text-gold-500/40 mb-2">RAW INPUT</div>
-                <div className="text-[11px] font-mono text-cyan-200/90 break-all whitespace-pre-wrap">{String(tx?.raw_input ?? '--')}</div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-lg border border-gold-500/15 bg-dark-900/40 p-4">
-                  <div className="text-[10px] font-mono text-gold-500/40 mb-2">DECODED</div>
+          <Card>
+            <CardHead
+              title="Input data"
+              meta={tx?.decoded_input?.method_call ? String(tx.decoded_input.method_call) : 'raw'}
+              actions={
+                <div className="flex items-center gap-1.5">
+                  <Btn onClick={() => setShowInput((v) => !v)}>{showInput ? 'Collapse' : 'Expand'}</Btn>
+                  <CopyBtn value={String(tx?.raw_input ?? '')} label="input" />
+                </div>
+              }
+            />
+            <div className="px-4 py-3">
+              {showInput ? (
+                <>
+                  <div className="rounded-lg border border-line bg-ink-900 p-3 text-[11px] font-mono text-txt-2 break-all whitespace-pre-wrap max-h-64 overflow-auto">
+                    {String(tx?.raw_input ?? '--')}
+                  </div>
                   {tx?.decoded_input?.parameters?.length ? (
-                    <div>
-                      <div className="text-xs font-mono text-cyan-300 mb-3">{tx?.decoded_input?.method_call || 'decoded'} </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-[11px] font-mono">
-                          <thead>
-                            <tr className="text-gold-500/50">
-                              <th className="text-left py-1 pr-4">NAME</th>
-                              <th className="text-left py-1 pr-4">TYPE</th>
-                              <th className="text-left py-1">VALUE</th>
+                    <div className="mt-3 rounded-lg border border-line bg-ink-900 p-3 overflow-x-auto">
+                      <div className="text-[11px] font-mono text-cyan mb-2">{tx?.decoded_input?.method_call || 'decoded'}</div>
+                      <table className="w-full text-[11px] font-mono">
+                        <thead>
+                          <tr className="text-txt-3 text-left">
+                            <th className="py-1 pr-4 font-medium">name</th>
+                            <th className="py-1 pr-4 font-medium">type</th>
+                            <th className="py-1 font-medium">value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tx.decoded_input.parameters.map((p: any, i: number) => (
+                            <tr key={i} className="border-t border-line/60">
+                              <td className="py-1.5 pr-4 text-txt-2">{p.name || `arg${i}`}</td>
+                              <td className="py-1.5 pr-4 text-txt-3">{p.type || '--'}</td>
+                              <td className="py-1.5 text-txt break-all">{String(p.value ?? p.hex ?? p)}</td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {tx.decoded_input.parameters.map((p: any, i: number) => (
-                              <motion.tr
-                                key={i}
-                                initial={{ opacity: 0, y: 6 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: i * 0.03 }}
-                                className="border-t border-gold-500/10"
-                              >
-                                <td className="py-2 pr-4 text-gold-500/70">{p.name || `arg${i}`}</td>
-                                <td className="py-2 pr-4 text-gold-500/50">{p.type || '--'}</td>
-                                <td className="py-2 text-cyan-200/90 break-all">{String(p.value ?? p.hex ?? p)}</td>
-                              </motion.tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {[0,1,2].map((i) => (
-                        <motion.div
-                          key={i}
-                          className="h-3 rounded bg-gold-500/10"
-                          animate={{ opacity: [0.35, 0.8, 0.35] }}
-                          transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut', delay: i * 0.1 }}
-                        />
-                      ))}
-                      <div className="text-[10px] font-mono text-gold-500/40">decoded pending / unavailable</div>
-                    </div>
-                  )}
-                </div>
-                <div className="rounded-lg border border-gold-500/15 bg-dark-900/40 p-4">
-                  <div className="text-[10px] font-mono text-gold-500/40 mb-2">INTERACTIONS</div>
-                  <div className="text-xs font-mono text-gold-500/60">Click-to-copy, scanline, decode queue…</div>
-                </div>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="input-collapsed"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="mt-4 text-[11px] font-mono text-gold-500/60 truncate"
-            >
-              {String(tx?.raw_input ?? '--')}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-      <div className="glow-box bg-dark-800/50 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-        <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
-          <Hash className="w-5 h-5 text-gold-500" /> QUICK ACTIONS
-        </h2>
-        <div className="flex flex-wrap gap-3">
-          <button onClick={() => copy('HASH', tx?.hash || hash)} className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors">
-            COPY HASH
-          </button>
-          <button onClick={() => tx?.from?.hash && copy('FROM', tx.from.hash)} className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors">
-            COPY FROM
-          </button>
-          <button onClick={() => tx?.to?.hash && copy('TO', tx.to.hash)} className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors">
-            COPY TO
-          </button>
-          <button onClick={() => tx?.from?.hash && onViewAddress(String(tx.from.hash))} className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors">
-            VIEW FROM
-          </button>
-          <button onClick={() => tx?.to?.hash && onViewAddress(String(tx.to.hash))} className="text-xs font-mono text-gold-500/80 hover:text-cyan-300 border border-gold-500/20 hover:border-cyan-500/40 px-4 py-2 rounded transition-colors">
-            VIEW TO
-          </button>
-        </div>
-
-      </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="text-[11px] font-mono text-txt-3 truncate">{String(tx?.raw_input ?? '--')}</div>
+              )}
+            </div>
+          </Card>
         </>
       ) : tab === 'logs' ? (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
-            <Database className="w-5 h-5 text-cyan-400" /> LOGS
-          </h2>
-          <div className="text-xs font-mono text-gold-500/60">
-            {logsLoading ? 'Loading logs…' : (logs && logs.length ? `${logs.length} log(s) found` : 'No logs')}
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {(logsLoading ? [0,1,2] : (logs || [])).map((lg: any, i: any) => (
-              <motion.div
-                key={logsLoading ? `sk-${i}` : String(lg?.index ?? i)}
-                layout
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.18 }}
-                className="rounded-xl border border-cyan-500/15 bg-dark-900/40 overflow-hidden"
-              >
-                <button
-                  onClick={() => {
-                    if (logsLoading) return;
-                    const k = String(lg?.index ?? i);
-                    setLogOpen((m) => ({ ...m, [k]: !m[k] }));
-                  }}
-                  className="w-full text-left p-4 flex items-start justify-between gap-4 hover:bg-cyan-500/5 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-mono text-gold-500/40">LOG #{logsLoading ? '--' : (lg?.index ?? i)}</div>
+        <Card>
+          <CardHead title="Logs" meta={logsLoading ? 'loading…' : `${logs?.length ?? 0} log(s)`} />
+          <div className="px-4 py-3 space-y-2">
+            {logsLoading ? (
+              <div className="space-y-2">
+                {[0, 1, 2].map((i) => <div key={i} className="h-10 rounded-lg bg-ink-700" />)}
+              </div>
+            ) : !logs || logs.length === 0 ? (
+              <Empty label="No logs." />
+            ) : (
+              logs.map((lg: any, i: any) => {
+                const k = String(lg?.index ?? i);
+                const open = !!logOpen[k];
+                return (
+                  <div key={k} className="rounded-lg border border-line bg-ink-900 overflow-hidden">
                     <button
-                      onClick={() => {
-                        if (logsLoading) return;
-                        const a = (lg?.address?.hash || lg?.address || '');
-                        if (a) onViewAddress(String(a));
-                      }}
-                      className="mt-1 text-left text-xs font-mono text-cyan-300 hover:text-cyan-200 break-all underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
+                      onClick={() => setLogOpen((m) => ({ ...m, [k]: !m[k] }))}
+                      className="w-full text-left px-3 py-2.5 flex items-center justify-between gap-3 hover:bg-ink-750/60 transition-colors"
                     >
-                      {logsLoading ? 'loading…' : (lg?.address?.hash || lg?.address || '--')}
+                      <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                        <Badge tone="neutral">log #{lg?.index ?? i}</Badge>
+                        <span className="text-[11px] font-mono text-cyan truncate">{eventName((lg?.topics || [])[0])}</span>
+                        <LinkText
+                          tone="muted"
+                          className="text-[11px]"
+                          onClick={() => {
+                            const a = lg?.address?.hash || lg?.address || '';
+                            if (a) onViewAddress(String(a));
+                          }}
+                        >
+                          {shortAddr(String(lg?.address?.hash || lg?.address || ''))}
+                        </LinkText>
+                      </div>
+                      <span className="text-[10px] font-mono text-txt-3 shrink-0">{open ? 'collapse' : 'expand'}</span>
                     </button>
-                    <div className="mt-1 text-[10px] font-mono text-gold-500/50">
-                      {eventName((lg?.topics || [])[0])} · topics {(lg?.topics || []).filter(Boolean).length} · block {lg?.block_number ?? '--'}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-[10px] font-mono text-cyan-300 border border-cyan-500/20 px-2 py-1 rounded">
-                    {logsLoading ? '…' : (logOpen[String(lg?.index ?? i)] ? 'COLLAPSE' : 'EXPAND')}
-                  </div>
-                </button>
-
-                <AnimatePresence initial={false}>
-                  {!logsLoading && logOpen[String(lg?.index ?? i)] ? (
-                    <motion.div
-                      key="open"
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.22, ease: 'easeInOut' }}
-                      className="px-4 pb-4"
-                    >
-                      <div className="rounded-lg border border-gold-500/15 bg-dark-900/50 p-4 relative overflow-hidden">
-                        <motion.div
-                          className="absolute left-0 top-0 w-full h-[2px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent"
-                          animate={{ x: ['-100%', '200%'] }}
-                          transition={{ duration: 1.6, repeat: Infinity, ease: 'linear' }}
-                        />
-                        <div className="text-[10px] font-mono text-gold-500/40 mb-2">EVENT</div>
-                        <div className="text-xs font-mono text-cyan-300 mb-3">{eventName((lg?.topics || [])[0])}</div>
-                        <div className="text-[10px] font-mono text-gold-500/40 mb-2">TOPICS</div>
-                        <div className="space-y-2">
+                    {open ? (
+                      <div className="px-3 pb-3 border-t border-line/60">
+                        <div className="mt-2 text-[10px] uppercase tracking-wider text-txt-3">Topics</div>
+                        <div className="mt-1 space-y-1">
                           {(lg?.topics || []).filter(Boolean).map((t: string, j: number) => (
-                            <div key={j} className="flex items-center justify-between gap-3">
-                              <div className="text-[11px] font-mono text-cyan-200/90 break-all">{t}</div>
-                              <button onClick={() => copy(`TOPIC${j}`, t)} className="text-[10px] font-mono text-cyan-300 border border-cyan-500/20 px-2 py-1 rounded hover:border-cyan-400/50">COPY</button>
+                            <div key={j} className="flex items-center justify-between gap-2">
+                              <div className="text-[11px] font-mono text-txt-2 break-all">{t}</div>
+                              <CopyBtn value={t} label={`topic${j}`} />
                             </div>
                           ))}
                         </div>
-
-                        <div className="mt-4 text-[10px] font-mono text-gold-500/40 mb-2">DATA</div>
-                        <div className="text-[11px] font-mono text-gold-500/80 break-all">{lg?.data || '--'}</div>
-                        <div className="mt-3 flex gap-2">
-                          <button onClick={() => copy('LOG_DATA', String(lg?.data || ''))} className="text-[10px] font-mono text-gold-500/80 border border-gold-500/20 px-2 py-1 rounded hover:border-cyan-500/40">COPY DATA</button>
-                          <button onClick={() => copy('LOG_ADDRESS', String(lg?.address?.hash || ''))} className="text-[10px] font-mono text-gold-500/80 border border-gold-500/20 px-2 py-1 rounded hover:border-cyan-500/40">COPY ADDRESS</button>
+                        <div className="mt-3 text-[10px] uppercase tracking-wider text-txt-3">Data</div>
+                        <div className="mt-1 flex items-start justify-between gap-2">
+                          <div className="text-[11px] font-mono text-txt-2 break-all">{lg?.data || '--'}</div>
+                          <CopyBtn value={String(lg?.data || '')} label="data" />
                         </div>
                       </div>
-                    </motion.div>
-                  ) : null}
-                </AnimatePresence>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
-            <ArrowRightLeft className="w-5 h-5 text-gold-500" /> TOKEN TRANSFERS
-          </h2>
-          <div className="text-xs font-mono text-gold-500/60">
-            {transfersLoading ? 'Loading token transfers…' : (transfers && transfers.length ? `${transfers.length} transfer(s) found` : 'No token transfers')}
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {(transfersLoading ? [0,1,2] : (transfers || [])).map((tr: any, i: any) => {
-              if (transfersLoading) {
-                return (
-                  <div key={`sk-${i}`} className="rounded-xl border border-gold-500/15 bg-dark-900/40 p-4">
-                    <div className="h-3 w-48 rounded bg-gold-500/10 mb-2" />
-                    <div className="h-3 w-full rounded bg-cyan-500/10" />
+                    ) : null}
                   </div>
                 );
-              }
-
-              // Best-effort field mapping (Blockscout varies by version)
-              const from = tr?.from?.hash || tr?.from || '--';
-              const to = tr?.to?.hash || tr?.to || '--';
-              const token = tr?.token?.symbol || tr?.token?.name || tr?.token?.address || tr?.token?.hash || '--';
-              const tokenType = String(tr?.token?.type || '');
-              const tokenId = tr?.total?.token_id ?? tr?.token_id ?? null;
-              const tokenInstance = tr?.total?.token_instance ?? tr?.token_instance ?? null;
-              const isNft = /721|1155/i.test(tokenType);
-              const amount = isNft
-                ? (tokenId != null ? `NFT #${String(tokenId)}` : 'NFT')
-                : (tr?.total?.value || tr?.value || tr?.amount || '--');
-              const direction = (String(from).toLowerCase() === String(tx?.from?.hash || '').toLowerCase()) ? 'OUT' : 'IN';
-
-              return (
-                <motion.div
-                  key={String(tr?.log_index ?? tr?.tx_hash ?? i)}
-                  layout
-                  initial={{ opacity: 0, x: -16 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.18 }}
-                  className="rounded-xl border border-gold-500/15 bg-dark-900/40 p-4 overflow-hidden relative"
-                >
-                  <motion.div
-                    className="absolute inset-y-0 left-0 w-1"
-                    animate={{ opacity: [0.25, 0.8, 0.25] }}
-                    transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
-                    style={{ background: direction === 'OUT' ? 'linear-gradient(#FFD700, rgba(255,215,0,0))' : 'linear-gradient(#00F0FF, rgba(0,240,255,0))' }}
-                  />
-
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="text-[10px] font-mono text-gold-500/40">{direction} · {token}</div>
-                      <div className="mt-1 text-sm font-mono text-cyan-200/90">{String(amount)}</div>
-                      {isNft && tokenInstance?.metadata?.name ? (
-                        <div className="mt-1 text-[10px] font-mono text-gold-500/55">{String(tokenInstance.metadata.name)}</div>
-                      ) : null}
-                      <div className="mt-2 text-[11px] font-mono text-gold-500/70">
-                        <span className="text-gold-500/40">from</span> {String(from).slice(0, 10)}…{String(from).slice(-6)}
-                      </div>
-                      <div className="text-[11px] font-mono text-gold-500/70">
-                        <span className="text-gold-500/40">to</span> {String(to).slice(0, 10)}…{String(to).slice(-6)}
-                      </div>
-                    </div>
-
-                    <div className="shrink-0 flex flex-col gap-2">
-                      <button onClick={() => copy('TRANSFER_FROM', String(from))} className="text-[10px] font-mono text-cyan-300 border border-cyan-500/20 px-2 py-1 rounded hover:border-cyan-400/50">COPY FROM</button>
-                      <button onClick={() => copy('TRANSFER_TO', String(to))} className="text-[10px] font-mono text-cyan-300 border border-cyan-500/20 px-2 py-1 rounded hover:border-cyan-400/50">COPY TO</button>
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
+              })
+            )}
           </div>
-        </div>
+        </Card>
+      ) : (
+        <Card>
+          <CardHead title="Token transfers" meta={transfersLoading ? 'loading…' : `${transfers?.length ?? 0} transfer(s)`} />
+          {transfersLoading ? (
+            <div className="px-4 py-3 space-y-2">
+              {[0, 1, 2].map((i) => <div key={i} className="h-10 rounded-lg bg-ink-700" />)}
+            </div>
+          ) : !transfers || transfers.length === 0 ? (
+            <Empty label="No token transfers." />
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Direction</Th>
+                  <Th>Token</Th>
+                  <Th>From</Th>
+                  <Th>To</Th>
+                  <Th right>Amount</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {transfers.map((tr: any, i: any) => {
+                  const from = tr?.from?.hash || tr?.from || '--';
+                  const to = tr?.to?.hash || tr?.to || '--';
+                  const token = tr?.token?.symbol || tr?.token?.name || shortAddr(String(tr?.token?.address || tr?.token?.hash || ''));
+                  const tokenType = String(tr?.token?.type || '');
+                  const tokenId = tr?.total?.token_id ?? tr?.token_id ?? null;
+                  const isNft = /721|1155/i.test(tokenType);
+                  const amount = isNft
+                    ? (tokenId != null ? `NFT #${String(tokenId)}` : 'NFT')
+                    : fmtUnits(tr?.total?.value || tr?.value || tr?.amount || '0', tr?.total?.decimals ?? tr?.token?.decimals ?? 18);
+                  const out = String(from).toLowerCase() === String(tx?.from?.hash || '').toLowerCase();
+                  return (
+                    <TRow key={String(tr?.log_index ?? i)}>
+                      <Td>{out ? <Badge tone="gold">out</Badge> : <Badge tone="cyan">in</Badge>}</Td>
+                      <Td mono className="text-txt-2">{String(token)}</Td>
+                      <Td mono>
+                        <LinkText tone="muted" onClick={() => from !== '--' && onViewAddress(String(from))} title={String(from)}>
+                          {shortAddr(String(from))}
+                        </LinkText>
+                      </Td>
+                      <Td mono>
+                        <LinkText tone="muted" onClick={() => to !== '--' && onViewAddress(String(to))} title={String(to)}>
+                          {shortAddr(String(to))}
+                        </LinkText>
+                      </Td>
+                      <Td right mono className="text-gold">{String(amount)}</Td>
+                    </TRow>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+        </Card>
       )}
-
-    </motion.div>
+    </Page>
   );
 };
 
-
+/* ------------------------------ NFT instance modal ---------------------------- */
 
 const NftInstanceModal = ({
   instance,
@@ -1894,109 +1297,109 @@ const NftInstanceModal = ({
   onViewToken,
   onViewAddress,
 }: {
-  instance: any | null,
-  onClose: () => void,
-  onViewToken?: (a: string) => void,
-  onViewAddress?: (a: string) => void,
+  instance: any | null;
+  onClose: () => void;
+  onViewToken?: (a: string) => void;
+  onViewAddress?: (a: string) => void;
 }) => {
-  if (!instance) return null;
   const traits = Array.isArray(instance?.metadata?.attributes) ? instance.metadata.attributes : [];
   const tokenAddr = String(instance?.token?.address || '').trim();
   const owner = String(instance?.owner?.hash || '').trim();
+
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-md flex items-center justify-center p-4"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ opacity: 0, y: 18, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 18, scale: 0.98 }}
-          transition={{ duration: 0.22 }}
-          onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-4xl rounded-2xl border border-cyan-500/20 bg-dark-900/90 shadow-[0_0_40px_rgba(0,240,255,0.12)] overflow-hidden"
-        >
-          <div className="flex items-center justify-between p-4 border-b border-cyan-500/15">
-            <div>
-              <div className="text-[10px] font-mono text-gold-500/45 tracking-widest">NFT INSTANCE</div>
-              <div className="text-lg font-mono text-cyan-300">{String(instance?.metadata?.name || `NFT #${instance?.id || '--'}`)}</div>
+    <Modal
+      open={!!instance}
+      onClose={onClose}
+      wide
+      title={instance ? String(instance?.metadata?.name || `NFT #${instance?.id || '--'}`) : ''}
+    >
+      {instance ? (
+        <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr]">
+          <div className="p-4 border-b lg:border-b-0 lg:border-r border-line bg-ink-950/50">
+            <div className="rounded-xl overflow-hidden border border-line bg-ink-900">
+              {instance?.image_url ? (
+                <img src={String(instance.image_url)} alt={String(instance?.metadata?.name || instance?.id || 'NFT')} className="w-full aspect-square object-cover" />
+              ) : (
+                <div className="aspect-square flex items-center justify-center text-[11px] font-mono text-txt-3">no image</div>
+              )}
             </div>
-            <button onClick={onClose} className="w-10 h-10 rounded-full border border-cyan-500/20 text-cyan-300 inline-flex items-center justify-center hover:border-cyan-400/60">
-              <X className="w-4 h-4" />
-            </button>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-0">
-            <div className="bg-black/30 p-4 border-r border-cyan-500/10">
-              <div className="rounded-2xl overflow-hidden border border-gold-500/10 bg-dark-900/60">
-                {instance?.image_url ? (
-                  <img src={String(instance.image_url)} alt={String(instance?.metadata?.name || instance?.id || 'NFT')} className="w-full aspect-square object-cover" />
+          <div className="p-4">
+            <div className="grid grid-cols-2 gap-3 text-[12px]">
+              <div className="rounded-lg border border-line bg-ink-800 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-txt-3">Token ID</div>
+                <div className="mt-1 font-mono text-cyan">#{String(instance?.id || '--')}</div>
+              </div>
+              <div className="rounded-lg border border-line bg-ink-800 p-3">
+                <div className="text-[10px] uppercase tracking-wider text-txt-3">Type</div>
+                <div className="mt-1 font-mono text-txt-2">{String(instance?.token_type || instance?.token?.type || '--')}</div>
+              </div>
+              <div className="rounded-lg border border-line bg-ink-800 p-3 col-span-2">
+                <div className="text-[10px] uppercase tracking-wider text-txt-3">Owner</div>
+                {owner && onViewAddress ? (
+                  <LinkText onClick={() => { onClose(); onViewAddress(owner); }} className="mt-1 text-[12px] break-all">{owner}</LinkText>
                 ) : (
-                  <div className="aspect-square flex items-center justify-center text-xs font-mono text-gold-500/40">NO IMAGE</div>
+                  <div className="mt-1 font-mono text-txt-2 break-all">{owner || '--'}</div>
                 )}
               </div>
             </div>
 
-            <div className="p-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
-                <div className="rounded-xl border border-cyan-500/15 bg-dark-800/60 p-4">
-                  <div className="text-gold-500/45">TOKEN ID</div>
-                  <div className="mt-1 text-cyan-300">#{String(instance?.id || '--')}</div>
-                </div>
-                <div className="rounded-xl border border-cyan-500/15 bg-dark-800/60 p-4">
-                  <div className="text-gold-500/45">TOKEN TYPE</div>
-                  <div className="mt-1 text-cyan-300">{String(instance?.token_type || instance?.token?.type || '--')}</div>
-                </div>
-                <div className="rounded-xl border border-cyan-500/15 bg-dark-800/60 p-4 md:col-span-2">
-                  <div className="text-gold-500/45">OWNER</div>
-                  {owner && onViewAddress ? (
-                    <button onClick={() => onViewAddress(owner)} className="mt-1 text-left text-cyan-300 hover:text-cyan-200 break-all underline decoration-cyan-500/30 hover:decoration-cyan-400/60">{owner}</button>
-                  ) : (
-                    <div className="mt-1 text-cyan-300 break-all">{owner || '--'}</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-5">
-                <div className="text-xs font-mono text-gold-500/55 tracking-widest">TRAITS</div>
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {traits.length ? traits.map((trait: any, i: number) => (
-                    <div key={i} className="rounded-xl border border-gold-500/12 bg-dark-800/50 p-3">
-                      <div className="text-[10px] font-mono text-gold-500/45">{String(trait?.trait_type || 'TRAIT')}</div>
-                      <div className="mt-1 text-sm font-mono text-cyan-300 break-words">{String(trait?.value ?? '--')}</div>
-                    </div>
-                  )) : (
-                    <div className="text-xs font-mono text-gold-500/45">No traits.</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-5 flex items-center gap-2 flex-wrap">
-                {tokenAddr && onViewToken ? (
-                  <button onClick={() => onViewToken(tokenAddr)} className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">OPEN TOKEN</button>
-                ) : null}
-                {instance?.external_app_url ? (
-                  <a href={String(instance.external_app_url)} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-lg border border-gold-500/20 text-gold-400 text-xs font-mono hover:border-cyan-500/40 hover:text-cyan-300">EXTERNAL</a>
-                ) : null}
+            <div className="mt-4">
+              <div className="text-[10px] uppercase tracking-wider text-txt-3">Traits</div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {traits.length ? traits.map((trait: any, i: number) => (
+                  <div key={i} className="rounded-lg border border-line bg-ink-800 p-2.5">
+                    <div className="text-[10px] text-txt-3">{String(trait?.trait_type || 'trait')}</div>
+                    <div className="mt-0.5 text-[12px] font-mono text-txt break-words">{String(trait?.value ?? '--')}</div>
+                  </div>
+                )) : (
+                  <div className="text-[12px] text-txt-3 col-span-2">No traits.</div>
+                )}
               </div>
             </div>
+
+            <div className="mt-4 flex items-center gap-2 flex-wrap">
+              {tokenAddr && onViewToken ? (
+                <Btn onClick={() => { onClose(); onViewToken(tokenAddr); }}>Open token</Btn>
+              ) : null}
+              {instance?.external_app_url ? (
+                <a
+                  href={String(instance.external_app_url)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 rounded-lg text-[12px] border border-line text-txt-2 hover:text-txt hover:border-line-2 transition-colors"
+                >
+                  External ↗
+                </a>
+              ) : null}
+            </div>
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+        </div>
+      ) : null}
+    </Modal>
   );
 };
 
-const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: { address: string, onBack: () => void, onViewTx: (h: string) => void, onViewAddress: (a: string) => void, onViewToken: (a: string) => void }) => {
+/* -------------------------------- Address view -------------------------------- */
+
+const AddressView = ({
+  address,
+  onBack,
+  onViewTx,
+  onViewAddress,
+  onViewToken,
+}: {
+  address: string;
+  onBack: () => void;
+  onViewTx: (h: string) => void;
+  onViewAddress: (a: string) => void;
+  onViewToken: (a: string) => void;
+}) => {
   const [info, setInfo] = useState<any>(null);
   const [tokenMeta, setTokenMeta] = useState<any>(null);
   const [tokenMetaLoading, setTokenMetaLoading] = useState<boolean>(false);
   const [tab, setTab] = useState<'overview' | 'contract' | 'txs' | 'tokens'>('overview');
-  const [copyToast, setCopyToast] = useState<string | null>(null);
   const [addrTxs, setAddrTxs] = useState<any[] | null>(null);
   const [addrTxsLoading, setAddrTxsLoading] = useState<boolean>(false);
   const [heldTokens, setHeldTokens] = useState<any[] | null>(null);
@@ -2004,25 +1407,10 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
   const [nftCollections, setNftCollections] = useState<any[] | null>(null);
   const [nftCollectionsLoading, setNftCollectionsLoading] = useState<boolean>(false);
   const [selectedNftInstance, setSelectedNftInstance] = useState<any | null>(null);
-
   const [contract, setContract] = useState<any>(null);
   const [contractLoading, setContractLoading] = useState<boolean>(false);
 
-  const fmtTDCAI = (weiLike: any, dp = 6) => {
-    try {
-      const wei = BigInt(String(weiLike ?? '0'));
-      const s = wei.toString();
-      const pad = s.length <= 18 ? '0'.repeat(18 - s.length + 1) + s : s;
-      const head = pad.slice(0, -18);
-      const tail = pad.slice(-18);
-      return `${head}.${tail.slice(0, dp)}`;
-    } catch {
-      return '--';
-    }
-  };
-
   useEffect(() => {
-    // reset per-address caches
     setAddrTxs(null);
     setHeldTokens(null);
     setNftCollections(null);
@@ -2033,28 +1421,20 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      try {
-        const res = await fetch(`/api/v2/addresses/${address}`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setInfo(j);
-      } catch {}
+      const j = await bs(`/addresses/${address}`);
+      if (j && !cancelled) setInfo(j);
     };
     load();
     return () => { cancelled = true; };
   }, [address]);
 
-  // Detect if this address is a token contract (so we can suggest the Token page)
   useEffect(() => {
     let cancelled = false;
     const loadTokenMeta = async () => {
       try {
         setTokenMetaLoading(true);
         const res = await fetch(`/api/v2/tokens/${address}`, { cache: 'no-store' });
-        if (res.status === 404) {
-          if (!cancelled) setTokenMeta(null);
-          return;
-        }
+        if (res.status === 404) { if (!cancelled) setTokenMeta(null); return; }
         if (res.status === 429) return;
         const j = await res.json();
         if (!cancelled && j?.address) setTokenMeta(j);
@@ -2064,24 +1444,18 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
         if (!cancelled) setTokenMetaLoading(false);
       }
     };
-
     setTokenMeta(null);
     loadTokenMeta();
-
     return () => { cancelled = true; };
   }, [address]);
 
   useEffect(() => {
     let cancelled = false;
     const loadAddrTxs = async () => {
-      try {
-        setAddrTxsLoading(true);
-        const res = await fetch(`/api/v2/addresses/${address}/transactions?limit=25`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setAddrTxs(j?.items || []);
-      } catch {}
-      finally { if (!cancelled) setAddrTxsLoading(false); }
+      setAddrTxsLoading(true);
+      const j = await bs(`/addresses/${address}/transactions?limit=25`);
+      if (j && !cancelled) setAddrTxs(j?.items || []);
+      if (!cancelled) setAddrTxsLoading(false);
     };
     if (tab === 'txs' && addrTxs == null && !addrTxsLoading) loadAddrTxs();
     return () => { cancelled = true; };
@@ -2090,17 +1464,10 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
   useEffect(() => {
     let cancelled = false;
     const loadHeldTokens = async () => {
-      try {
-        setHeldTokensLoading(true);
-        const res = await fetch(`/api/v2/addresses/${address}/tokens`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setHeldTokens(j?.items || []);
-      } catch {
-        if (!cancelled) setHeldTokens([]);
-      } finally {
-        if (!cancelled) setHeldTokensLoading(false);
-      }
+      setHeldTokensLoading(true);
+      const j = await bs(`/addresses/${address}/tokens`);
+      if (!cancelled) setHeldTokens(j?.items || []);
+      if (!cancelled) setHeldTokensLoading(false);
     };
     if (tab === 'tokens' && heldTokens == null && !heldTokensLoading) loadHeldTokens();
     return () => { cancelled = true; };
@@ -2109,17 +1476,10 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
   useEffect(() => {
     let cancelled = false;
     const loadNftCollections = async () => {
-      try {
-        setNftCollectionsLoading(true);
-        const res = await fetch(`/api/v2/addresses/${address}/nft/collections`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setNftCollections(j?.items || []);
-      } catch {
-        if (!cancelled) setNftCollections([]);
-      } finally {
-        if (!cancelled) setNftCollectionsLoading(false);
-      }
+      setNftCollectionsLoading(true);
+      const j = await bs(`/addresses/${address}/nft/collections`);
+      if (!cancelled) setNftCollections(j?.items || []);
+      if (!cancelled) setNftCollectionsLoading(false);
     };
     if (tab === 'tokens' && nftCollections == null && !nftCollectionsLoading) loadNftCollections();
     return () => { cancelled = true; };
@@ -2142,36 +1502,10 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
     return () => { cancelled = true; };
   }, [tab, address, info?.is_contract]);
 
-  const copy = async (label: string, value: string) => {
-    const ok = await copyToClipboard(value);
-    if (ok) {
-      setCopyToast(`Copied ${label}: ${value}`);
-      setTimeout(() => setCopyToast(null), 1400);
-    }
-  };
+  const isNftMeta = String(tokenMeta?.type || '').includes('721') || String(tokenMeta?.type || '').includes('1155');
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
-    >
-      <AnimatePresence>
-        {copyToast ? (
-          <motion.div
-            key="copytoast-addr"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.18 }}
-            className="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-lg bg-dark-900/80 border border-cyan-500/30 backdrop-blur-md text-xs font-mono text-cyan-300 shadow-[0_0_20px_rgba(0,240,255,0.15)]"
-          >
-            {copyToast}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-
+    <Page>
       <NftInstanceModal
         instance={selectedNftInstance}
         onClose={() => setSelectedNftInstance(null)}
@@ -2179,387 +1513,286 @@ const AddressView = ({ address, onBack, onViewTx, onViewAddress, onViewToken }: 
         onViewAddress={(a: string) => onViewAddress(a)}
       />
 
-      <button
-        onClick={onBack}
-        className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 font-mono text-sm mb-8 group transition-colors cursor-pointer"
-      >
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-        BACK
-      </button>
-
-      <div className="mb-6 flex items-center gap-4">
-        <div className="p-4 bg-gold-500/10 rounded-xl border border-gold-500/20 shadow-[0_0_20px_rgba(255,215,0,0.12)]">
-          <Globe className="w-8 h-8 text-gold-400" />
-        </div>
-        <div className="min-w-0">
-          <h1 className="text-3xl md:text-4xl font-black tracking-widest">
-            ADDRESS <span className="glow-text text-gold-500">VIEW</span>
-          </h1>
-          <div className="mt-2 flex items-center gap-3">
-            <div className="text-xs font-mono text-cyan-200/90 break-all">{info?.hash || address}</div>
-            <button onClick={() => copy('ADDRESS', info?.hash || address)} className="text-[10px] font-mono text-cyan-300 border border-cyan-500/20 px-2 py-1 rounded hover:border-cyan-400/50">
-              COPY
-            </button>
+      <PageTitle
+        title="Address"
+        onBack={onBack}
+        backLabel="Back"
+        sub={
+          <span className="inline-flex items-center gap-2 flex-wrap">
+            {info?.is_contract ? <Badge tone="warn">contract</Badge> : <Badge tone="neutral">EOA</Badge>}
+            {info?.is_verified ? <Badge tone="ok">verified</Badge> : null}
+            <span className="font-mono break-all">{info?.hash || address}</span>
+            <CopyBtn value={info?.hash || address} label="address" />
+          </span>
+        }
+        right={
+          <div className="rounded-xl border border-line bg-ink-800 px-4 py-2 text-right">
+            <div className="text-[10px] uppercase tracking-wider text-txt-3">Balance</div>
+            <div className="font-mono text-gold text-[15px] tnum">{fmtWei(info?.coin_balance)} {NATIVE_SYMBOL}</div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {tokenMeta ? (
-        <div className="mb-6 glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-4 border-t-2 border-t-cyan-500/30">
-          <div className="flex items-start justify-between gap-4">
+        <Card className="mb-4">
+          <div className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
             <div className="min-w-0">
-              <div className="text-xs font-mono text-gold-500/60">
-                {String(tokenMeta.type || '').includes('721') || String(tokenMeta.type || '').includes('1155') ? 'This address is an NFT contract' : 'This address is a token contract'}
-              </div>
-              <div className="mt-1 text-sm font-mono text-cyan-300">
-                {String(tokenMeta.symbol || 'TOKEN')} · {String(tokenMeta.name || 'Token')}
-              </div>
-              <div className="mt-1 text-[10px] font-mono text-gold-500/45">
-                type {String(tokenMeta.type || '--')} · holders {String(tokenMeta.holders ?? '--')} · {String(tokenMeta.type || '').includes('721') || String(tokenMeta.type || '').includes('1155') ? 'supply' : 'decimals'} {String(String(tokenMeta.type || '').includes('721') || String(tokenMeta.type || '').includes('1155') ? (tokenMeta.total_supply ?? '--') : (tokenMeta.decimals ?? '--'))}
+              <div className="text-[11px] text-txt-3">{isNftMeta ? 'This address is an NFT contract' : 'This address is a token contract'}</div>
+              <div className="mt-0.5 text-[13px] font-mono text-txt">
+                <span className="text-gold">{String(tokenMeta.symbol || 'TOKEN')}</span> · {String(tokenMeta.name || 'Token')}
+                <span className="text-txt-3 text-[11px]"> · {String(tokenMeta.type || '--')} · holders {String(tokenMeta.holders ?? '--')}</span>
               </div>
             </div>
-            <button
-              onClick={() => onViewToken(String(tokenMeta.address || address))}
-              className="shrink-0 px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60"
-            >
-              OPEN TOKEN PAGE
-            </button>
+            <Btn tone="primary" onClick={() => onViewToken(String(tokenMeta.address || address))}>Open token page</Btn>
           </div>
-        </div>
+        </Card>
       ) : tokenMetaLoading ? (
-        <div className="mb-6 text-xs font-mono text-gold-500/50">Checking token metadata…</div>
+        <div className="mb-4 text-[11px] font-mono text-txt-3">Checking token metadata…</div>
       ) : null}
 
-      <div className="mb-8 flex flex-wrap gap-2">
-        {([
-          { k: 'overview', label: 'OVERVIEW' },
-          ...(info?.is_contract ? [{ k: 'contract', label: 'CONTRACT' }] : []),
-          { k: 'txs', label: 'TXS' },
-          { k: 'tokens', label: 'TOKENS' },
-        ] as any[]).map((t: any) => (
-          <button
-            key={t.k}
-            onClick={() => setTab(t.k)}
-            className={`relative px-4 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${tab === t.k ? 'text-cyan-200 border-cyan-500/50 bg-cyan-500/10' : 'text-gold-500/60 border-gold-500/15 hover:border-cyan-500/30 hover:text-cyan-300'}`}
-          >
-            {tab === t.k && (
-              <motion.span
-                layoutId="addr-tab"
-                className="absolute inset-0 rounded-lg border border-cyan-400/30"
-                initial={false}
-                transition={{ type: 'spring', stiffness: 240, damping: 26 }}
-              />
-            )}
-            <span className="relative">{t.label}</span>
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          { k: 'overview', label: 'Overview' },
+          ...(info?.is_contract ? [{ k: 'contract', label: 'Contract' }] : []),
+          { k: 'txs', label: 'Transactions' },
+          { k: 'tokens', label: 'Tokens & NFTs' },
+        ]}
+        active={tab}
+        onChange={(k) => setTab(k as any)}
+      />
 
       {tab === 'overview' ? (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
-            <Info className="w-5 h-5 text-gold-500" /> OVERVIEW
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
-            <DetailRow label="ADDRESS" value={info?.hash || address} isCyan />
-            <DetailRow label="COIN BALANCE" value={`${fmtTDCAI(info?.coin_balance)} tDCAI`} />
-            <DetailRow label="UPDATED AT BLOCK" value={info?.block_number_balance_updated_at ?? '--'} />
-            <DetailRow label="IS CONTRACT" value={String(info?.is_contract ?? '--')} />
+        <Card>
+          <CardHead title="Overview" />
+          <div className="px-4 py-1">
+            <KV label="Address" copy={info?.hash || address}><span className="font-mono text-cyan break-all">{info?.hash || address}</span></KV>
+            <KV label="Balance"><span className="font-mono text-gold">{fmtWei(info?.coin_balance)} {NATIVE_SYMBOL}</span></KV>
+            <KV label="Last balance update"><span className="font-mono">block {info?.block_number_balance_updated_at ?? '--'}</span></KV>
+            <KV label="Type"><span className="font-mono">{info?.is_contract ? 'Contract' : 'Externally owned account'}</span></KV>
           </div>
-        </div>
+        </Card>
       ) : tab === 'contract' ? (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
-            <Code2 className="w-5 h-5 text-gold-500" /> CONTRACT
-          </h2>
-
-          {!info?.is_contract ? (
-            <div className="text-xs font-mono text-gold-500/60">Not a contract.</div>
-          ) : (
-            <>
-              <div className="text-xs font-mono text-gold-500/60 flex flex-wrap items-center gap-3">
-                <span>Status: <span className={info?.is_verified ? 'text-cyan-300' : 'text-gold-400'}>{info?.is_verified ? 'Verified' : 'Unverified'}</span></span>
-                <button
-                  onClick={() => { try { window.open(`http://139.180.140.143/address/${address}?tab=contract`, '_blank'); } catch {} }}
-                  className="text-[10px] font-mono text-cyan-300 border border-cyan-500/20 px-2 py-1 rounded hover:border-cyan-400/50"
-                >
-                  Verify / Publish (Blockscout)
-                </button>
-              </div>
-
-              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
-                <div className="flex flex-col gap-2 border-b border-gold-500/10 pb-4">
-                  <span className="text-xs font-mono text-gold-500/50">CREATOR</span>
-                  <div className="flex items-start justify-between gap-3">
-                    {info?.creator_address_hash ? (
-                      <button
-                        onClick={() => onViewAddress(String(info.creator_address_hash))}
-                        className="text-left text-sm font-mono break-all text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                      >
-                        {String(info.creator_address_hash)}
-                      </button>
-                    ) : (
-                      <div className="text-sm font-mono break-all text-gold-400">--</div>
-                    )}
-                    {info?.creator_address_hash ? (
-                      <button
-                        onClick={() => copy('CREATOR', String(info.creator_address_hash))}
-                        className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors"
-                      >
-                        ⧉
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2 border-b border-gold-500/10 pb-4">
-                  <span className="text-xs font-mono text-gold-500/50">CREATION TX</span>
-                  <div className="flex items-start justify-between gap-3">
-                    {info?.creation_transaction_hash ? (
-                      <button
-                        onClick={() => onViewTx(String(info.creation_transaction_hash))}
-                        className="text-left text-sm font-mono break-all text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                      >
-                        {String(info.creation_transaction_hash)}
-                      </button>
-                    ) : (
-                      <div className="text-sm font-mono break-all text-gold-400">--</div>
-                    )}
-                    {info?.creation_transaction_hash ? (
-                      <button
-                        onClick={() => copy('CREATION_TX', String(info.creation_transaction_hash))}
-                        className="shrink-0 w-6 h-6 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors"
-                      >
-                        ⧉
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-8">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs font-mono text-gold-500/60 tracking-widest">CONTRACT CREATION CODE</div>
-                  {contract?.creation_bytecode ? (
-                    <button onClick={() => copy('CREATION_CODE', String(contract.creation_bytecode))} className="shrink-0 w-7 h-7 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
-                  ) : null}
-                </div>
-                <div className="mt-2 rounded-xl border border-gold-500/15 bg-dark-900/40 p-4">
-                  <pre className="whitespace-pre-wrap break-all text-[11px] leading-relaxed font-mono text-cyan-200/90 max-h-64 overflow-auto">
-                    {contractLoading ? 'Loading…' : (contract?.creation_bytecode || '—')}
-                  </pre>
-                </div>
-              </div>
-
-              <div className="mt-8">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs font-mono text-gold-500/60 tracking-widest">DEPLOYED BYTECODE</div>
-                  {contract?.deployed_bytecode ? (
-                    <button onClick={() => copy('DEPLOYED_BYTECODE', String(contract.deployed_bytecode))} className="shrink-0 w-7 h-7 inline-flex items-center justify-center text-[11px] font-mono text-cyan-300 border border-cyan-500/25 hover:border-cyan-400 rounded transition-colors">⧉</button>
-                  ) : null}
-                </div>
-                <div className="mt-2 rounded-xl border border-gold-500/15 bg-dark-900/40 p-4">
-                  <pre className="whitespace-pre-wrap break-all text-[11px] leading-relaxed font-mono text-cyan-200/90 max-h-64 overflow-auto">
-                    {contractLoading ? 'Loading…' : (contract?.deployed_bytecode || '—')}
-                  </pre>
-                </div>
-              </div>
-
-              <div className="mt-8 text-[11px] font-mono text-gold-500/50">
-                Tip: these fields come from Blockscout API v2 (<span className="text-cyan-300">:4000/api/v2</span>). If you want, I can also add ABI / Read / Write tabs once the contract is verified.
-              </div>
-            </>
-          )}
-        </div>
-      ) : tab === 'txs' ? (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
-            <ArrowRightLeft className="w-5 h-5 text-cyan-400" /> TRANSACTIONS
-          </h2>
-          <div className="text-xs font-mono text-gold-500/60">{addrTxsLoading ? 'Loading…' : (addrTxs && addrTxs.length ? `${addrTxs.length} tx(s)` : 'No transactions')}</div>
-          <div className="mt-4 space-y-3">
-            {(addrTxsLoading ? [0,1,2] : (addrTxs || [])).map((tx: any, i: any) => (
-              <motion.div
-                key={addrTxsLoading ? `sk-${i}` : tx.hash}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.18 }}
-                className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4"
+        <Card>
+          <CardHead
+            title="Contract"
+            meta={info?.is_verified ? 'verified' : 'unverified'}
+            actions={
+              <a
+                href={`http://${window.location.hostname}:3000/address/${address}?tab=contract`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 rounded-lg text-[12px] border border-line text-txt-2 hover:text-txt hover:border-line-2 transition-colors"
               >
-                {addrTxsLoading ? (
-                  <div className="h-3 w-full rounded bg-gold-500/10" />
-                ) : (
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <button
-                        onClick={() => onViewTx(tx.hash)}
-                        className="text-left text-[11px] font-mono text-cyan-300 hover:text-cyan-200 break-all underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                      >
-                        {tx.hash}
-                      </button>
-                      <div className="mt-1 text-[10px] font-mono text-gold-500/50">
-                        status {tx.status ?? tx.result ?? '--'} · block {tx.block_number ?? tx.block ?? '--'} · pos {tx.position ?? '--'}
-                      </div>
-                      <div className="mt-2 text-[10px] font-mono text-gold-500/55 flex flex-col gap-1">
-                        <div>
-                          <span className="text-gold-500/35">from</span>{' '}
-                          <button
-                            onClick={() => tx?.from?.hash && onViewAddress(String(tx.from.hash))}
-                            className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                          >
-                            {String(tx?.from?.hash || '').slice(0, 10)}…{String(tx?.from?.hash || '').slice(-6)}
-                          </button>
-                        </div>
-                        <div>
-                          <span className="text-gold-500/35">to</span>{' '}
-                          <button
-                            onClick={() => tx?.to?.hash && onViewAddress(String(tx.to.hash))}
-                            className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60"
-                          >
-                            {String(tx?.to?.hash || '').slice(0, 10)}…{String(tx?.to?.hash || '').slice(-6)}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-xs font-mono text-gold-500/90">
-                        {fmtTDCAI(tx.value)} <span className="text-gold-500/60">tDCAI</span>
-                      </div>
-                      <div className="text-[10px] font-mono text-gold-500/35">{String(tx.value ?? '0')} wei</div>
-                      <div className="mt-2 text-[10px] font-mono text-gold-500/60">fee {fmtTDCAI(tx.fee?.value ?? tx.fee ?? '0')} tDCAI</div>
-                      <div className="text-[10px] font-mono text-gold-500/35">{String(tx.fee?.value ?? tx.fee ?? '0')} wei</div>
-                      <div className="text-[10px] font-mono text-gold-500/50">conf {tx.confirmations ?? '--'}</div>
-                    </div>
-                  </div>
-                )}
-              </motion.div>
-            ))}
+                Verify on Blockscout ↗
+              </a>
+            }
+          />
+          <div className="px-4 py-1">
+            <KV label="Creator" copy={info?.creator_address_hash || undefined}>
+              {info?.creator_address_hash ? (
+                <LinkText onClick={() => onViewAddress(String(info.creator_address_hash))} className="text-[12px]">{String(info.creator_address_hash)}</LinkText>
+              ) : '--'}
+            </KV>
+            <KV label="Creation tx" copy={info?.creation_transaction_hash || undefined}>
+              {info?.creation_transaction_hash ? (
+                <LinkText onClick={() => onViewTx(String(info.creation_transaction_hash))} className="text-[12px]">{String(info.creation_transaction_hash)}</LinkText>
+              ) : '--'}
+            </KV>
           </div>
-        </div>
-      ) : (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-          <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-4">
-            <Database className="w-5 h-5 text-cyan-400" /> TOKENS
-          </h2>
-
-          {tokenMeta ? (
-            <div className="mb-4 rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
-              <div className="text-[10px] font-mono text-gold-500/40">
-                {String(tokenMeta.type || '').includes('721') || String(tokenMeta.type || '').includes('1155') ? 'This address is the NFT contract itself' : 'This address is the token contract itself'}
-              </div>
-              <div className="mt-1 text-sm font-mono text-cyan-300">
-                {String(tokenMeta.symbol || 'TOKEN')} · {String(tokenMeta.name || 'Token')}
-              </div>
-              <div className="mt-1 text-[10px] font-mono text-gold-500/50">
-                type {String(tokenMeta.type || '--')} · holders {String(tokenMeta.holders ?? '--')} · total supply {String(tokenMeta.total_supply ?? '--')}
-              </div>
-              <button
-                onClick={() => onViewToken(String(tokenMeta.address || address))}
-                className="mt-3 px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60"
-              >
-                OPEN TOKEN PAGE
-              </button>
+          <div className="px-4 pb-4">
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="text-[10px] uppercase tracking-wider text-txt-3">Creation bytecode</div>
+              {contract?.creation_bytecode ? <CopyBtn value={String(contract.creation_bytecode)} label="creation code" /> : null}
             </div>
-          ) : null}
-
-          <div className="text-xs font-mono text-gold-500/60">
-            {heldTokensLoading ? 'Loading held tokens…' : (heldTokens && heldTokens.length ? `${heldTokens.length} token(s) held by this address` : 'No tokens held by this address.')}
+            <pre className="mt-1.5 rounded-lg border border-line bg-ink-900 p-3 whitespace-pre-wrap break-all text-[10px] leading-relaxed font-mono text-txt-2 max-h-48 overflow-auto">
+              {contractLoading ? 'Loading…' : (contract?.creation_bytecode || '—')}
+            </pre>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <div className="text-[10px] uppercase tracking-wider text-txt-3">Deployed bytecode</div>
+              {contract?.deployed_bytecode ? <CopyBtn value={String(contract.deployed_bytecode)} label="deployed code" /> : null}
+            </div>
+            <pre className="mt-1.5 rounded-lg border border-line bg-ink-900 p-3 whitespace-pre-wrap break-all text-[10px] leading-relaxed font-mono text-txt-2 max-h-48 overflow-auto">
+              {contractLoading ? 'Loading…' : (contract?.deployed_bytecode || '—')}
+            </pre>
           </div>
+        </Card>
+      ) : tab === 'txs' ? (
+        <Card>
+          <CardHead title="Transactions" meta={addrTxsLoading ? 'loading…' : `${addrTxs?.length ?? 0} shown`} />
+          <Table>
+            <thead>
+              <tr>
+                <Th>Tx hash</Th>
+                <Th>Block</Th>
+                <Th>Age</Th>
+                <Th>From</Th>
+                <Th>To</Th>
+                <Th right>Value ({NATIVE_SYMBOL})</Th>
+                <Th right>Fee</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {addrTxsLoading || addrTxs == null ? (
+                <SkeletonRows rows={8} cols={7} />
+              ) : addrTxs.length === 0 ? (
+                <tr><td colSpan={7}><Empty label="No transactions." /></td></tr>
+              ) : (
+                addrTxs.map((tx: any) => {
+                  const from = String(tx?.from?.hash || '');
+                  const to = String(tx?.to?.hash || '');
+                  const self = String(address).toLowerCase();
+                  const out = from.toLowerCase() === self;
+                  return (
+                    <TRow key={tx.hash}>
+                      <Td mono>
+                        <div className="flex items-center gap-1">
+                          <StatusBadge status={tx.status ?? tx.result} />
+                          <LinkText onClick={() => onViewTx(tx.hash)} title={tx.hash}>{short(String(tx.hash), 10, 6)}</LinkText>
+                        </div>
+                      </Td>
+                      <Td mono>
+                        <span className="text-txt-3">#{tx.block_number ?? tx.block ?? '--'}</span>
+                      </Td>
+                      <Td mono className="text-txt-3" title={String(tx.timestamp || '')}>{timeAgo(tx.timestamp)}</Td>
+                      <Td mono>
+                        <span className="inline-flex items-center gap-1">
+                          {out ? <Badge tone="gold">out</Badge> : <Badge tone="cyan">in</Badge>}
+                          <LinkText tone="muted" onClick={() => from && onViewAddress(from)} title={from}>{shortAddr(from)}</LinkText>
+                        </span>
+                      </Td>
+                      <Td mono>
+                        <LinkText tone="muted" onClick={() => to && onViewAddress(to)} title={to}>{shortAddr(to)}</LinkText>
+                      </Td>
+                      <Td right mono className="text-gold">{fmtWei(tx.value)}</Td>
+                      <Td right mono className="text-txt-3">{fmtWei(tx.fee?.value ?? tx.fee ?? '0')}</Td>
+                    </TRow>
+                  );
+                })
+              )}
+            </tbody>
+          </Table>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {tokenMeta ? (
+            <Card>
+              <div className="px-4 py-3 flex items-center justify-between gap-3">
+                <div className="text-[12px] text-txt-2">
+                  {isNftMeta ? 'This address is the NFT contract itself.' : 'This address is the token contract itself.'}{' '}
+                  <span className="font-mono text-gold">{String(tokenMeta.symbol || 'TOKEN')}</span>
+                  <span className="text-txt-3"> · supply {String(tokenMeta.total_supply ?? '--')}</span>
+                </div>
+                <Btn onClick={() => onViewToken(String(tokenMeta.address || address))}>Open token</Btn>
+              </div>
+            </Card>
+          ) : null}
 
           {nftCollectionsLoading ? (
-            <div className="mt-4 text-xs font-mono text-gold-500/50">Loading NFT previews…</div>
+            <div className="text-[11px] font-mono text-txt-3">Loading NFT collections…</div>
           ) : nftCollections && nftCollections.length ? (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {nftCollections.map((col: any, i: number) => {
-                const token = col?.token || {};
-                const tokenAddr = String(token?.address || '').trim();
-                const instances = Array.isArray(col?.token_instances) ? col.token_instances : [];
-                return (
-                  <div key={tokenAddr || i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-mono text-cyan-300">{String(token?.symbol || 'NFT')} · {String(token?.name || 'Collection')}</div>
-                        <div className="mt-1 text-[10px] font-mono text-gold-500/45">{String(token?.type || '--')} · {String(col?.amount || '--')} item(s)</div>
+            <Card>
+              <CardHead title="NFT collections" meta={`${nftCollections.length} collection(s)`} />
+              <div className="px-4 py-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {nftCollections.map((col: any, i: number) => {
+                  const token = col?.token || {};
+                  const tokenAddr = String(token?.address || '').trim();
+                  const instances = Array.isArray(col?.token_instances) ? col.token_instances : [];
+                  return (
+                    <div key={tokenAddr || i} className="rounded-lg border border-line bg-ink-900 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-mono"><span className="text-gold">{String(token?.symbol || 'NFT')}</span> · <span className="text-txt-2">{String(token?.name || 'Collection')}</span></div>
+                          <div className="mt-0.5 text-[10px] font-mono text-txt-3">{String(token?.type || '--')} · {String(col?.amount || '--')} item(s)</div>
+                        </div>
+                        {tokenAddr ? <Btn onClick={() => onViewToken(tokenAddr)}>Open</Btn> : null}
                       </div>
-                      {tokenAddr ? (
-                        <button onClick={() => onViewToken(tokenAddr)} className="shrink-0 px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">OPEN</button>
-                      ) : null}
+                      <div className="mt-3 grid grid-cols-4 gap-2">
+                        {instances.slice(0, 4).map((inst: any) => (
+                          <button
+                            type="button"
+                            key={String(inst?.id)}
+                            onClick={() => setSelectedNftInstance({ ...inst, token })}
+                            className="rounded-lg border border-line bg-ink-800 overflow-hidden hover:border-line-2 transition-colors text-left"
+                          >
+                            <div className="aspect-square bg-ink-950/60">
+                              {inst?.image_url ? (
+                                <img src={String(inst.image_url)} alt={String(inst?.metadata?.name || inst?.id || 'NFT')} className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-[9px] font-mono text-txt-3">#{String(inst?.id || '?')}</div>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      {instances.slice(0, 4).map((inst: any) => (
-                        <button type="button" key={String(inst?.id)} onClick={() => setSelectedNftInstance({ ...inst, token })} className="rounded-lg border border-gold-500/10 bg-black/20 overflow-hidden transition-transform duration-300 hover:scale-[1.035] hover:border-cyan-400/35 cursor-pointer text-left">
-                          <div className="aspect-square bg-dark-900/50">
-                            {inst?.image_url ? (
-                              <img src={String(inst.image_url)} alt={String(inst?.metadata?.name || inst?.id || 'NFT')} className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-[10px] font-mono text-gold-500/40">NO IMAGE</div>
-                            )}
-                          </div>
-                          <div className="p-2">
-                            <div className="text-[10px] font-mono text-cyan-300 truncate">{String(inst?.metadata?.name || `NFT #${inst?.id || '--'}`)}</div>
-                            <div className="text-[10px] font-mono text-gold-500/45">#{String(inst?.id || '--')}</div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            </Card>
           ) : null}
 
-          <div className="mt-4 space-y-3">
-            {(heldTokens || []).map((item: any, i: number) => {
-              const token = item?.token || item;
-              const tokenAddr = String(token?.address || token?.hash || '').trim();
-              const symbol = String(token?.symbol || 'TOKEN');
-              const name = String(token?.name || 'Token');
-              const type = String(token?.type || '--');
-              const value = item?.value ?? token?.value ?? '--';
-              return (
-                <div key={tokenAddr || i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="text-sm font-mono text-cyan-300">{symbol} · {name}</div>
-                      <div className="mt-1 text-[10px] font-mono text-gold-500/45">{type} · value {String(value)}</div>
-                      <button
-                        onClick={() => tokenAddr && onViewToken(tokenAddr)}
-                        className="mt-2 text-left text-[11px] font-mono text-gold-500/60 hover:text-cyan-300 underline decoration-gold-500/10 hover:decoration-cyan-400/60 break-all"
-                      >
-                        {tokenAddr || '--'}
-                      </button>
-                    </div>
-                    {tokenAddr ? (
-                      <button
-                        onClick={() => onViewToken(tokenAddr)}
-                        className="shrink-0 px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60"
-                      >
-                        OPEN
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <Card>
+            <CardHead title="Held tokens" meta={heldTokensLoading ? 'loading…' : `${heldTokens?.length ?? 0} token(s)`} />
+            {heldTokensLoading || heldTokens == null ? (
+              <Table><tbody><SkeletonRows rows={4} cols={4} /></tbody></Table>
+            ) : heldTokens.length === 0 ? (
+              <Empty label="No tokens held by this address." />
+            ) : (
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Token</Th>
+                    <Th>Contract</Th>
+                    <Th>Type</Th>
+                    <Th right>Amount</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {heldTokens.map((item: any, i: number) => {
+                    const token = item?.token || item;
+                    const tokenAddr = String(token?.address || token?.hash || '').trim();
+                    return (
+                      <TRow key={tokenAddr || i}>
+                        <Td mono>
+                          <span className="text-gold">{String(token?.symbol || 'TOKEN')}</span>{' '}
+                          <span className="text-txt-2">{String(token?.name || '')}</span>
+                        </Td>
+                        <Td mono>
+                          <LinkText tone="muted" onClick={() => tokenAddr && onViewToken(tokenAddr)} title={tokenAddr}>
+                            {shortAddr(tokenAddr)}
+                          </LinkText>
+                        </Td>
+                        <Td mono className="text-txt-3">{String(token?.type || '--')}</Td>
+                        <Td right mono className="text-txt-2">
+                          {/721|1155/i.test(String(token?.type || ''))
+                            ? String(item?.value ?? '--')
+                            : fmtUnits(item?.value ?? '0', token?.decimals ?? 18)}
+                        </Td>
+                      </TRow>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            )}
+          </Card>
         </div>
       )}
-    </motion.div>
+    </Page>
   );
 };
 
+/* -------------------------------- Tokens list -------------------------------- */
+
 const TokensView = ({
   onViewToken,
-  onViewAddress,
 }: {
-  onViewToken: (a: string) => void,
-  onViewAddress: (a: string) => void,
+  onViewToken: (a: string) => void;
+  onViewAddress: (a: string) => void;
 }) => {
   const [featured, setFeatured] = useState<any[]>([]);
   const [featuredLoading, setFeaturedLoading] = useState(true);
   const [items, setItems] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const short = (s: string, a = 10, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
 
   useEffect(() => {
     let cancelled = false;
@@ -2577,161 +1810,101 @@ const TokensView = ({
       }
     };
     loadFeatured();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch('/api/v2/tokens?limit=25', { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setItems(j?.items || []);
-      } catch {
-        if (!cancelled) setItems([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      setLoading(true);
+      const j = await bs('/tokens?limit=25');
+      if (!cancelled) setItems(j?.items || []);
+      if (!cancelled) setLoading(false);
     };
     load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
-    >
-      <div className="mb-6 flex items-center gap-4">
-        <div className="p-4 bg-gold-500/10 rounded-xl border border-gold-500/20 shadow-[0_0_20px_rgba(255,215,0,0.10)]">
-          <Database className="w-8 h-8 text-gold-400" />
-        </div>
-        <div className="min-w-0">
-          <h1 className="text-3xl md:text-4xl font-black tracking-widest">TOKENS <span className="glow-text text-gold-500">LIST</span></h1>
-          <div className="mt-2 text-xs font-mono text-gold-500/60">Official featured + all indexed tokens</div>
-        </div>
-      </div>
+    <Page>
+      <PageTitle title="Tokens" sub="Official featured tokens and everything indexed on-chain" />
 
-      <div className="mb-10 glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
-            <CheckCircle2 className="w-5 h-5" /> FEATURED
-          </h2>
-          <div className="text-[10px] font-mono text-gold-500/50">edit /featured-tokens.json</div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <Card className="mb-4">
+        <CardHead title="Featured" meta="curated by DCAI" />
+        <div className="px-4 py-3">
           {featuredLoading ? (
-            <div className="text-xs font-mono text-gold-500/60">Loading…</div>
+            <div className="text-[11px] font-mono text-txt-3">Loading…</div>
           ) : featured.length ? (
-            featured.map((t: any, i: number) => {
-              const addr = String(t?.address || t?.hash || t?.contract || '').trim();
-              const symbol = String(t?.symbol || '');
-              const name = String(t?.name || '');
-              const kind = String(t?.type || '');
-              return (
-                <div key={addr || i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
-                  <div className="flex items-start justify-between gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {featured.map((t: any, i: number) => {
+                const addr = String(t?.address || t?.hash || t?.contract || '').trim();
+                return (
+                  <div key={addr || i} className="rounded-lg border border-gold/25 bg-gold/5 p-3 flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-xs font-mono text-cyan-300">{symbol || name || 'Featured token'}</div>
-                      <div className="mt-1 text-[10px] font-mono text-gold-500/50">{kind ? kind.toUpperCase() : '—'}</div>
-                      {addr ? (
-                        <button
-                          onClick={() => onViewToken(addr)}
-                          className="mt-2 text-left text-[11px] font-mono text-gold-500/70 hover:text-cyan-300 break-all underline decoration-gold-500/10 hover:decoration-cyan-400/60"
-                        >
-                          {addr}
-                        </button>
-                      ) : (
-                        <div className="mt-2 text-[11px] font-mono text-rose-300">Missing address</div>
-                      )}
+                      <div className="text-[13px] font-mono">
+                        <span className="text-gold font-semibold">{String(t?.symbol || t?.name || 'Token')}</span>
+                        {t?.name && t?.symbol ? <span className="text-txt-2"> · {String(t.name)}</span> : null}
+                        {t?.type ? <Badge tone="neutral" className="ml-2">{String(t.type).toUpperCase()}</Badge> : null}
+                      </div>
+                      <div className="mt-1 text-[11px] font-mono text-txt-3 break-all">{addr || 'missing address'}</div>
                     </div>
-                    {addr ? (
-                      <button
-                        onClick={() => onViewToken(addr)}
-                        className="shrink-0 px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60"
-                      >
-                        VIEW
-                      </button>
-                    ) : null}
+                    {addr ? <Btn tone="primary" onClick={() => onViewToken(addr)}>View</Btn> : null}
                   </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="text-xs font-mono text-gold-500/60">
-              No featured tokens configured yet. Put official token contracts into <span className="text-cyan-300">/featured-tokens.json</span>.
+                );
+              })}
             </div>
+          ) : (
+            <div className="text-[12px] text-txt-3">No featured tokens configured (edit /featured-tokens.json).</div>
           )}
         </div>
-      </div>
+      </Card>
 
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-        <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-gold-500">
-          <Database className="w-5 h-5" /> ALL TOKENS
-        </h2>
-        <div className="mt-2 text-xs font-mono text-gold-500/60">{loading ? 'Loading…' : (items ? `${items.length} token(s)` : '—')}</div>
-
-        <div className="mt-6 space-y-3">
-          {(items || []).map((t: any, i: number) => {
-            const addr = String(t?.address || t?.hash || t?.contract_address || t?.contractAddress || '').trim();
-            const sym = String(t?.symbol || t?.token_symbol || '').trim();
-            const nm = String(t?.name || t?.token_name || '').trim();
-            const holders = t?.holders_count ?? t?.holders ?? null;
-            const transfers = t?.transfers_count ?? t?.transfers ?? null;
-
-            return (
-              <div key={addr || i} className="rounded-xl border border-gold-500/15 bg-dark-900/40 p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-mono text-cyan-200/90">
-                      {(sym || nm) ? (<>{sym ? <span className="text-cyan-300">{sym}</span> : null}{sym && nm ? ' · ' : ''}{nm ? <span className="text-gold-500/80">{nm}</span> : null}</>) : 'Token'}
-                    </div>
-                    {addr ? (
-                      <button
-                        onClick={() => onViewToken(addr)}
-                        className="mt-1 text-left text-[11px] font-mono text-gold-500/60 hover:text-cyan-300 break-all underline decoration-gold-500/10 hover:decoration-cyan-400/60"
-                      >
-                        {short(addr, 14, 10)}
-                      </button>
-                    ) : (
-                      <div className="mt-1 text-[11px] font-mono text-gold-500/40">--</div>
-                    )}
-                    <div className="mt-1 text-[10px] font-mono text-gold-500/40">
-                      holders {holders ?? '--'} · transfers {transfers ?? '--'}
-                    </div>
-                  </div>
-                  {addr ? (
-                    <button
-                      onClick={() => onViewToken(addr)}
-                      className="shrink-0 px-3 py-2 rounded-lg border border-gold-500/20 text-gold-500/80 text-xs font-mono hover:border-cyan-500/40 hover:text-cyan-300"
-                    >
-                      OPEN
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
-
-          {!loading && items && items.length === 0 ? (
-            <div className="text-xs font-mono text-gold-500/60">
-              No tokens indexed yet. Once developers deploy ERC-20/NFT contracts (and there are transfers/holders), Blockscout will start listing them here.
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </motion.div>
+      <Card>
+        <CardHead title="All tokens" meta={loading ? 'loading…' : `${items?.length ?? 0} indexed`} />
+        <Table>
+          <thead>
+            <tr>
+              <Th>Token</Th>
+              <Th>Contract</Th>
+              <Th>Type</Th>
+              <Th right>Holders</Th>
+              <Th right>Transfers</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {items == null ? (
+              <SkeletonRows rows={6} cols={5} />
+            ) : items.length === 0 ? (
+              <tr><td colSpan={5}><Empty label="No tokens indexed yet." /></td></tr>
+            ) : (
+              items.map((t: any, i: number) => {
+                const addr = String(t?.address || t?.hash || t?.contract_address || '').trim();
+                return (
+                  <TRow key={addr || i}>
+                    <Td mono>
+                      <LinkText onClick={() => addr && onViewToken(addr)}>
+                        <span className="text-gold">{String(t?.symbol || '?')}</span>
+                        <span className="text-txt-2"> · {String(t?.name || 'Token')}</span>
+                      </LinkText>
+                    </Td>
+                    <Td mono>
+                      <span className="text-txt-3" title={addr}>{shortAddr(addr)}</span>
+                    </Td>
+                    <Td><Badge tone="neutral">{String(t?.type || '--')}</Badge></Td>
+                    <Td right mono className="text-txt-2">{t?.holders_count ?? t?.holders ?? '--'}</Td>
+                    <Td right mono className="text-txt-2">{t?.transfers_count ?? t?.transfers ?? '--'}</Td>
+                  </TRow>
+                );
+              })
+            )}
+          </tbody>
+        </Table>
+      </Card>
+    </Page>
   );
 };
+
+/* --------------------------------- Token view -------------------------------- */
 
 const TokenView = ({
   address,
@@ -2740,11 +1913,11 @@ const TokenView = ({
   onViewBlock,
   onViewAddress,
 }: {
-  address: string,
-  onBack: () => void,
-  onViewTx: (h: string) => void,
-  onViewBlock: (h: number) => void,
-  onViewAddress: (a: string) => void,
+  address: string;
+  onBack: () => void;
+  onViewTx: (h: string) => void;
+  onViewBlock: (h: number) => void;
+  onViewAddress: (a: string) => void;
 }) => {
   const [info, setInfo] = useState<any>(null);
   const [tab, setTab] = useState<'overview' | 'transfers' | 'holders' | 'instances'>('transfers');
@@ -2762,51 +1935,21 @@ const TokenView = ({
   const [instancesLoading, setInstancesLoading] = useState<boolean>(false);
   const [selectedInstance, setSelectedInstance] = useState<any | null>(null);
 
-  const [loading, setLoading] = useState(false);
-
-  const short = (s: string, a = 10, b = 6) => (s && s.length > a + b ? `${s.slice(0, a)}…${s.slice(-b)}` : s);
-
-  const fmtUnits = (valueLike: any, decimalsLike: any, dp = 6) => {
-    try {
-      const d = Number(decimalsLike ?? 18);
-      const v = BigInt(String(valueLike ?? '0'));
-      const s = v.toString();
-      const pad = s.length <= d ? '0'.repeat(d - s.length + 1) + s : s;
-      const head = pad.slice(0, -d);
-      const tail = pad.slice(-d);
-      return `${head}.${tail.slice(0, dp)}`;
-    } catch {
-      return '--';
-    }
-  };
-
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/v2/tokens/${address}`, { cache: 'no-store' });
-        const j = await res.json();
-        if (!cancelled) setInfo(j);
-      } catch {
-        if (!cancelled) setInfo(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      const j = await bs(`/tokens/${address}`);
+      if (!cancelled) setInfo(j);
     };
     if (address) load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [address]);
 
-  // Reset pagination caches when switching tokens
   useEffect(() => {
     setTransfers(null);
     setTransfersPageParams(null);
     setTransfersNextParams(null);
     setTransfersPrevStack([]);
-
     setHolders(null);
     setHoldersPageParams(null);
     setHoldersNextParams(null);
@@ -2818,72 +1961,44 @@ const TokenView = ({
     let cancelled = false;
 
     const loadTransfers = async () => {
-      try {
-        const sp = new URLSearchParams();
-        sp.set('limit', '25');
-        if (transfersPageParams) {
-          for (const [k, v] of Object.entries(transfersPageParams)) if (v != null) sp.set(String(k), String(v));
-        }
-        const res = await fetch(`/api/v2/tokens/${address}/transfers?${sp.toString()}`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) {
-          setTransfers(j?.items || []);
-          setTransfersNextParams(j?.next_page_params || null);
-        }
-      } catch {
-        if (!cancelled) {
-          setTransfers([]);
-          setTransfersNextParams(null);
-        }
+      const sp = new URLSearchParams();
+      sp.set('limit', '25');
+      if (transfersPageParams) {
+        for (const [k, v] of Object.entries(transfersPageParams)) if (v != null) sp.set(String(k), String(v));
+      }
+      const j = await bs(`/tokens/${address}/transfers?${sp.toString()}`);
+      if (!cancelled) {
+        setTransfers(j?.items || []);
+        setTransfersNextParams(j?.next_page_params || null);
       }
     };
 
     const loadHolders = async () => {
-      try {
-        const sp = new URLSearchParams();
-        sp.set('limit', '25');
-        if (holdersPageParams) {
-          for (const [k, v] of Object.entries(holdersPageParams)) if (v != null) sp.set(String(k), String(v));
-        }
-        const res = await fetch(`/api/v2/tokens/${address}/holders?${sp.toString()}`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) {
-          setHolders(j?.items || []);
-          setHoldersNextParams(j?.next_page_params || null);
-        }
-      } catch {
-        if (!cancelled) {
-          setHolders([]);
-          setHoldersNextParams(null);
-        }
+      const sp = new URLSearchParams();
+      sp.set('limit', '25');
+      if (holdersPageParams) {
+        for (const [k, v] of Object.entries(holdersPageParams)) if (v != null) sp.set(String(k), String(v));
+      }
+      const j = await bs(`/tokens/${address}/holders?${sp.toString()}`);
+      if (!cancelled) {
+        setHolders(j?.items || []);
+        setHoldersNextParams(j?.next_page_params || null);
       }
     };
 
     const loadInstances = async () => {
-      try {
-        setInstancesLoading(true);
-        const res = await fetch(`/api/v2/tokens/${address}/instances`, { cache: 'no-store' });
-        if (res.status === 429) return;
-        const j = await res.json();
-        if (!cancelled) setInstances(j?.items || []);
-      } catch {
-        if (!cancelled) setInstances([]);
-      } finally {
-        if (!cancelled) setInstancesLoading(false);
-      }
+      setInstancesLoading(true);
+      const j = await bs(`/tokens/${address}/instances`);
+      if (!cancelled) setInstances(j?.items || []);
+      if (!cancelled) setInstancesLoading(false);
     };
 
     if (!address) return () => { cancelled = true; };
-
     if (tab === 'transfers') loadTransfers();
     if (tab === 'holders') loadHolders();
     if (tab === 'instances' && /721|1155/i.test(String(info?.type || '')) && instances == null && !instancesLoading) loadInstances();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [address, tab, transfersPageParams, holdersPageParams, info?.type]);
 
   const isNft = /721|1155/i.test(String(info?.type || ''));
@@ -2892,296 +2007,238 @@ const TokenView = ({
   const name = info?.name || '';
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
-    >
-      <button onClick={onBack} className="text-cyan-400 hover:text-cyan-300 flex items-center gap-2 font-mono text-sm mb-6 group transition-colors">
-        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-        BACK TO TOKENS
-      </button>
-
+    <Page>
       <NftInstanceModal
         instance={selectedInstance}
         onClose={() => setSelectedInstance(null)}
         onViewAddress={(a: string) => onViewAddress(a)}
       />
 
-      <div className="mb-6 flex items-center gap-4">
-        <div className="p-4 bg-gold-500/10 rounded-xl border border-gold-500/20 shadow-[0_0_20px_rgba(255,215,0,0.10)]">
-          <Database className="w-8 h-8 text-gold-400" />
-        </div>
-        <div className="min-w-0">
-          <h1 className="text-3xl md:text-4xl font-black tracking-widest">
-            {symbol} <span className="glow-text text-gold-500">·</span> <span className="glow-text-cyan text-cyan-300">{name || 'Token'}</span>
-          </h1>
-          <button
-            onClick={() => onViewAddress(address)}
-            className="mt-2 text-left text-xs font-mono text-gold-500/60 hover:text-cyan-300 underline decoration-gold-500/10 hover:decoration-cyan-400/60 break-all"
-          >
-            {address}
-          </button>
-          <div className="mt-1 text-[10px] font-mono text-gold-500/40">type {info?.type ?? '--'} · holders {info?.holders ?? '--'} · {isNft ? `supply ${info?.total_supply ?? '--'}` : `decimals ${decimals ?? '--'}`}</div>
-        </div>
-      </div>
+      <PageTitle
+        title={symbol}
+        accent={name || 'Token'}
+        onBack={onBack}
+        backLabel="All tokens"
+        sub={
+          <span className="inline-flex items-center gap-2 flex-wrap">
+            <Badge tone="neutral">{String(info?.type || '--')}</Badge>
+            <LinkText tone="muted" onClick={() => onViewAddress(address)} className="text-[12px] break-all">{address}</LinkText>
+            <CopyBtn value={address} label="token address" />
+          </span>
+        }
+        right={
+          <div className="rounded-xl border border-line bg-ink-800 px-4 py-2 text-right">
+            <div className="text-[10px] uppercase tracking-wider text-txt-3">Holders</div>
+            <div className="font-mono text-txt text-[15px] tnum">{info?.holders ?? '--'}</div>
+          </div>
+        }
+      />
 
-      <div className="mb-6 flex flex-wrap gap-2">
-        {[
-          { k: 'transfers', label: 'TOKEN TRANSFERS' },
-          { k: 'holders', label: 'HOLDERS' },
-          ...(isNft ? [{ k: 'instances', label: 'NFTS' }] : []),
-          { k: 'overview', label: 'OVERVIEW' },
-        ].map((t) => (
-          <button
-            key={t.k}
-            onClick={() => setTab(t.k as any)}
-            className={`relative px-4 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${tab === t.k ? 'text-cyan-200 border-cyan-500/50 bg-cyan-500/10' : 'text-gold-500/60 border-gold-500/15 hover:border-cyan-500/30 hover:text-cyan-300'}`}
-          >
-            {tab === t.k && (
-              <motion.span
-                layoutId="token-tab"
-                className="absolute inset-0 rounded-lg border border-cyan-400/30"
-                initial={false}
-                transition={{ type: 'spring', stiffness: 240, damping: 26 }}
-              />
-            )}
-            <span className="relative">{t.label}</span>
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          { k: 'transfers', label: 'Transfers' },
+          { k: 'holders', label: 'Holders' },
+          ...(isNft ? [{ k: 'instances', label: 'NFTs' }] : []),
+          { k: 'overview', label: 'Overview' },
+        ]}
+        active={tab}
+        onChange={(k) => setTab(k as any)}
+      />
 
       {tab === 'overview' ? (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-          <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-gold-500">
-            <Info className="w-5 h-5" /> OVERVIEW
-          </h2>
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
-            <DetailRow label="SYMBOL" value={symbol} isCyan />
-            <DetailRow label="NAME" value={name || '--'} />
-            <DetailRow label="DECIMALS" value={isNft ? 'not applicable (NFT)' : String(decimals)} />
-            <DetailRow label="TOTAL SUPPLY" value={isNft ? `${String(info?.total_supply ?? '--')} NFT` : `${fmtUnits(info?.total_supply, decimals, 6)} ${symbol}`} />
+        <Card>
+          <CardHead title="Overview" />
+          <div className="px-4 py-1">
+            <KV label="Symbol"><span className="font-mono text-gold">{symbol}</span></KV>
+            <KV label="Name"><span className="font-mono">{name || '--'}</span></KV>
+            <KV label="Type"><Badge tone="neutral">{String(info?.type || '--')}</Badge></KV>
+            <KV label="Decimals"><span className="font-mono">{isNft ? 'n/a (NFT)' : String(decimals)}</span></KV>
+            <KV label="Total supply">
+              <span className="font-mono">{isNft ? `${String(info?.total_supply ?? '--')} NFT` : `${fmtUnits(info?.total_supply, decimals)} ${symbol}`}</span>
+            </KV>
+            <KV label="Contract" copy={address}><span className="font-mono text-cyan break-all">{address}</span></KV>
           </div>
-          <div className="mt-4 text-[11px] font-mono text-gold-500/50">{loading ? 'Loading…' : ''}</div>
-        </div>
+        </Card>
       ) : tab === 'holders' ? (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-          <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
-            <Globe className="w-5 h-5" /> HOLDERS
-          </h2>
-          <div className="mt-2 text-xs font-mono text-gold-500/60">{holders == null ? 'Loading…' : `${holders.length} holder(s)`}</div>
-
-          <div className="mt-4 flex items-center gap-2">
-            <button
-              disabled={holdersPrevStack.length === 0}
-              onClick={() => {
-                if (!holdersPrevStack.length) return;
-                const copy = holdersPrevStack.slice();
-                const prev = copy.pop();
-                setHoldersPrevStack(copy);
-                setHoldersPageParams(prev || null);
-              }}
-              className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${holdersPrevStack.length ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
-            >
-              PREV
-            </button>
-            <button
-              disabled={!holdersNextParams}
-              onClick={() => {
-                if (!holdersNextParams) return;
-                setHoldersPrevStack((s) => [...s, holdersPageParams]);
-                setHoldersPageParams(holdersNextParams);
-              }}
-              className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${holdersNextParams ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
-            >
-              NEXT
-            </button>
-          </div>
-
-          <div className="mt-6 space-y-3">
-            {(holders || []).map((h: any, i: number) => {
-              const a = String(h?.address?.hash || h?.address || '').trim();
-              const v = h?.value;
-              return (
-                <div key={a || i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <button
-                      onClick={() => a && onViewAddress(a)}
-                      className="text-left text-[11px] font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60 break-all"
-                    >
-                      {a ? short(a, 14, 10) : '--'}
-                    </button>
-                    <div className="text-right">
-                      <div className="text-sm font-mono text-gold-500/90">{isNft ? `${String(v ?? '--')} NFT` : `${fmtUnits(v, decimals, 6)} ${symbol}`}</div>
-                      <div className="text-[10px] font-mono text-gold-500/35">{String(v ?? '--')} raw</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {holders && holders.length === 0 ? (
-              <div className="text-xs font-mono text-gold-500/60">No holders.</div>
-            ) : null}
-          </div>
-        </div>
+        <Card>
+          <CardHead
+            title="Holders"
+            meta={holders == null ? 'loading…' : `${holders.length} on this page`}
+            actions={
+              <Pager
+                canPrev={holdersPrevStack.length > 0}
+                canNext={!!holdersNextParams}
+                onPrev={() => {
+                  if (!holdersPrevStack.length) return;
+                  const copy = holdersPrevStack.slice();
+                  const prev = copy.pop();
+                  setHoldersPrevStack(copy);
+                  setHoldersPageParams(prev || null);
+                }}
+                onNext={() => {
+                  if (!holdersNextParams) return;
+                  setHoldersPrevStack((s) => [...s, holdersPageParams]);
+                  setHoldersPageParams(holdersNextParams);
+                }}
+              />
+            }
+          />
+          <Table>
+            <thead>
+              <tr>
+                <Th>Address</Th>
+                <Th right>Amount</Th>
+                <Th right>% of supply</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {holders == null ? (
+                <SkeletonRows rows={8} cols={3} />
+              ) : holders.length === 0 ? (
+                <tr><td colSpan={3}><Empty label="No holders." /></td></tr>
+              ) : (
+                holders.map((h: any, i: number) => {
+                  const a = String(h?.address?.hash || h?.address || '').trim();
+                  const v = h?.value;
+                  let pct: string = '--';
+                  try {
+                    const tot = BigInt(String(info?.total_supply ?? '0'));
+                    if (tot > 0n) pct = ((Number(BigInt(String(v ?? '0')) * 10000n / tot) / 100)).toFixed(2) + '%';
+                  } catch {}
+                  return (
+                    <TRow key={a || i}>
+                      <Td mono>
+                        <LinkText tone="muted" onClick={() => a && onViewAddress(a)} title={a}>{short(a, 12, 8)}</LinkText>
+                      </Td>
+                      <Td right mono className="text-gold">
+                        {isNft ? `${String(v ?? '--')} NFT` : fmtUnits(v, decimals)}
+                      </Td>
+                      <Td right mono className="text-txt-3">{pct}</Td>
+                    </TRow>
+                  );
+                })
+              )}
+            </tbody>
+          </Table>
+        </Card>
       ) : tab === 'instances' ? (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-          <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
-            <Database className="w-5 h-5" /> NFT INSTANCES
-          </h2>
-          <div className="mt-2 text-xs font-mono text-gold-500/60">{instancesLoading ? 'Loading…' : `${(instances || []).length} NFT instance(s)`}</div>
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <Card>
+          <CardHead title="NFT instances" meta={instancesLoading ? 'loading…' : `${(instances || []).length} shown`} />
+          <div className="px-4 py-3 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
             {(instances || []).map((inst: any) => (
-              <div key={String(inst?.id)} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 overflow-hidden transition-transform duration-300 hover:scale-[1.02] hover:border-cyan-400/40">
-                <button type="button" onClick={() => setSelectedInstance(inst)} className="aspect-square bg-dark-900/60 block w-full text-left cursor-pointer">
+              <button
+                type="button"
+                key={String(inst?.id)}
+                onClick={() => setSelectedInstance(inst)}
+                className="rounded-lg border border-line bg-ink-900 overflow-hidden hover:border-line-2 transition-colors text-left"
+              >
+                <div className="aspect-square bg-ink-950/60">
                   {inst?.image_url ? (
                     <img src={String(inst.image_url)} alt={String(inst?.metadata?.name || inst?.id || 'NFT')} className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-xs font-mono text-gold-500/40">NO IMAGE</div>
+                    <div className="w-full h-full flex items-center justify-center text-[10px] font-mono text-txt-3">no image</div>
                   )}
-                </button>
-                <div className="p-4">
-                  <div className="text-sm font-mono text-cyan-300">{String(inst?.metadata?.name || `NFT #${inst?.id || '--'}`)}</div>
-                  <div className="mt-1 text-[10px] font-mono text-gold-500/45">tokenId #{String(inst?.id || '--')}</div>
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/45 break-all">owner {String(inst?.owner?.hash || '--')}</div>
-                  <div className="mt-3 flex items-center gap-2 flex-wrap">
-                    <button onClick={() => setSelectedInstance(inst)} className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">VIEW NFT</button>
-                  </div>
                 </div>
-              </div>
+                <div className="p-2.5">
+                  <div className="text-[12px] font-mono text-txt truncate">{String(inst?.metadata?.name || `NFT #${inst?.id || '--'}`)}</div>
+                  <div className="mt-0.5 text-[10px] font-mono text-txt-3 truncate">#{String(inst?.id || '--')} · {shortAddr(String(inst?.owner?.hash || ''))}</div>
+                </div>
+              </button>
             ))}
-          </div>
-        </div>
-      ) : (
-        <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-          <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-gold-500">
-            <ArrowRightLeft className="w-5 h-5" /> TOKEN TRANSFERS
-          </h2>
-          <div className="mt-2 text-xs font-mono text-gold-500/60">{transfers == null ? 'Loading…' : `${transfers.length} transfer(s)`}</div>
-
-          <div className="mt-4 flex items-center gap-2">
-            <button
-              disabled={transfersPrevStack.length === 0}
-              onClick={() => {
-                if (!transfersPrevStack.length) return;
-                const copy = transfersPrevStack.slice();
-                const prev = copy.pop();
-                setTransfersPrevStack(copy);
-                setTransfersPageParams(prev || null);
-              }}
-              className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${transfersPrevStack.length ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
-            >
-              PREV
-            </button>
-            <button
-              disabled={!transfersNextParams}
-              onClick={() => {
-                if (!transfersNextParams) return;
-                setTransfersPrevStack((s) => [...s, transfersPageParams]);
-                setTransfersPageParams(transfersNextParams);
-              }}
-              className={`px-3 py-2 rounded-lg border font-mono text-xs tracking-widest transition-colors ${transfersNextParams ? 'text-gold-400 border-gold-500/20 hover:border-cyan-500/40 hover:text-cyan-300' : 'text-gold-500/30 border-gold-500/10 cursor-not-allowed'}`}
-            >
-              NEXT
-            </button>
-          </div>
-
-          <div className="mt-6 space-y-3">
-            {(transfers || []).map((tr: any, i: number) => {
-              const txh = String(tr?.transaction_hash || tr?.tx_hash || '').trim();
-              const bn = Number(tr?.block_number);
-              const from = String(tr?.from?.hash || tr?.from || '').trim();
-              const to = String(tr?.to?.hash || tr?.to || '').trim();
-              const method = String(tr?.method || '').trim();
-              const amt = tr?.total?.value ?? tr?.value ?? tr?.amount ?? '0';
-              const tokenId = tr?.total?.token_id ?? tr?.token_id ?? tr?.token_id;
-
-              const methodLabel = () => {
-                const z = '0x0000000000000000000000000000000000000000';
-                if (String(from).toLowerCase() === z) return 'MINT';
-                if (method.toLowerCase() === '0xa9059cbb') return 'TRANSFER';
-                return method ? method.slice(0, 10) : '--';
-              };
-
-              return (
-                <div key={(txh || i) + ':' + String(tr?.log_index ?? i)} className="rounded-xl border border-gold-500/15 bg-dark-900/40 p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] font-mono tracking-widest px-2 py-0.5 rounded border border-cyan-500/20 bg-cyan-500/10 text-cyan-300">
-                          {methodLabel()}
-                        </span>
-                        {txh ? (
-                          <button
-                            onClick={() => onViewTx(txh)}
-                            className="text-left text-[11px] font-mono text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60 break-all"
-                          >
-                            {short(txh, 14, 10)}
-                          </button>
-                        ) : null}
-                        {Number.isFinite(bn) ? (
-                          <button
-                            onClick={() => onViewBlock(bn)}
-                            className="text-[11px] font-mono text-gold-500/70 hover:text-cyan-300 underline decoration-gold-500/10 hover:decoration-cyan-400/60"
-                          >
-                            #{bn}
-                          </button>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-2 text-[10px] font-mono text-gold-500/55 flex flex-col gap-1">
-                        <div>
-                          <span className="text-gold-500/35">from</span>{' '}
-                          <button onClick={() => from && onViewAddress(from)} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">{short(from, 12, 6)}</button>
-                        </div>
-                        <div>
-                          <span className="text-gold-500/35">to</span>{' '}
-                          <button onClick={() => to && onViewAddress(to)} className="text-cyan-300 hover:text-cyan-200 underline decoration-cyan-500/30 hover:decoration-cyan-400/60">{short(to, 12, 6)}</button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="shrink-0 text-right">
-                      <div className="text-sm font-mono text-gold-500/90">
-                        {isNft ? (tokenId != null ? `NFT #${String(tokenId)}` : 'NFT') : <>{fmtUnits(amt, decimals, 6)} <span className="text-gold-500/60">{symbol}</span></>}
-                      </div>
-                      <div className="text-[10px] font-mono text-gold-500/35">tokenId {tokenId == null ? '-' : String(tokenId)}</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {transfers && transfers.length === 0 ? (
-              <div className="text-xs font-mono text-gold-500/60">No token transfers yet.</div>
+            {!instancesLoading && (!instances || instances.length === 0) ? (
+              <div className="col-span-full"><Empty label="No NFT instances." /></div>
             ) : null}
           </div>
-        </div>
+        </Card>
+      ) : (
+        <Card>
+          <CardHead
+            title="Token transfers"
+            meta={transfers == null ? 'loading…' : `${transfers.length} on this page`}
+            actions={
+              <Pager
+                canPrev={transfersPrevStack.length > 0}
+                canNext={!!transfersNextParams}
+                onPrev={() => {
+                  if (!transfersPrevStack.length) return;
+                  const copy = transfersPrevStack.slice();
+                  const prev = copy.pop();
+                  setTransfersPrevStack(copy);
+                  setTransfersPageParams(prev || null);
+                }}
+                onNext={() => {
+                  if (!transfersNextParams) return;
+                  setTransfersPrevStack((s) => [...s, transfersPageParams]);
+                  setTransfersPageParams(transfersNextParams);
+                }}
+              />
+            }
+          />
+          <Table>
+            <thead>
+              <tr>
+                <Th>Method</Th>
+                <Th>Tx</Th>
+                <Th>Block</Th>
+                <Th>From</Th>
+                <Th>To</Th>
+                <Th right>Amount</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {transfers == null ? (
+                <SkeletonRows rows={8} cols={6} />
+              ) : transfers.length === 0 ? (
+                <tr><td colSpan={6}><Empty label="No token transfers yet." /></td></tr>
+              ) : (
+                transfers.map((tr: any, i: number) => {
+                  const txh = String(tr?.transaction_hash || tr?.tx_hash || '').trim();
+                  const bn = Number(tr?.block_number);
+                  const from = String(tr?.from?.hash || tr?.from || '').trim();
+                  const to = String(tr?.to?.hash || tr?.to || '').trim();
+                  const method = String(tr?.method || '').trim();
+                  const amt = tr?.total?.value ?? tr?.value ?? tr?.amount ?? '0';
+                  const tokenId = tr?.total?.token_id ?? tr?.token_id ?? null;
+                  const z = '0x0000000000000000000000000000000000000000';
+                  const label = String(from).toLowerCase() === z ? 'mint' : (method || 'transfer');
+                  return (
+                    <TRow key={(txh || i) + ':' + String(tr?.log_index ?? i)}>
+                      <Td><Badge tone={label === 'mint' ? 'ok' : 'neutral'}>{label}</Badge></Td>
+                      <Td mono>
+                        {txh ? (
+                          <LinkText onClick={() => onViewTx(txh)} title={txh}>{short(txh, 10, 6)}</LinkText>
+                        ) : <span className="text-txt-3">--</span>}
+                      </Td>
+                      <Td mono>
+                        {Number.isFinite(bn) ? (
+                          <LinkText tone="muted" onClick={() => onViewBlock(bn)}>#{bn}</LinkText>
+                        ) : <span className="text-txt-3">--</span>}
+                      </Td>
+                      <Td mono>
+                        <LinkText tone="muted" onClick={() => from && onViewAddress(from)} title={from}>{shortAddr(from)}</LinkText>
+                      </Td>
+                      <Td mono>
+                        <LinkText tone="muted" onClick={() => to && onViewAddress(to)} title={to}>{shortAddr(to)}</LinkText>
+                      </Td>
+                      <Td right mono className="text-gold">
+                        {isNft ? (tokenId != null ? `NFT #${String(tokenId)}` : 'NFT') : `${fmtUnits(amt, decimals)} ${symbol}`}
+                      </Td>
+                    </TRow>
+                  );
+                })
+              )}
+            </tbody>
+          </Table>
+        </Card>
       )}
-    </motion.div>
+    </Page>
   );
 };
 
+/* ------------------------------- API dashboard -------------------------------- */
+
 const DashboardView = () => {
   const STAKE_CONTRACT = '0x54ff6c64f1f7915a3aD54743aDd92b32412B06BC';
-
-  const apiBase = (() => {
-    try {
-      return `${window.location.protocol}//${window.location.hostname}/admin/api`;
-    } catch {
-      return 'http://139.180.140.143/admin/api';
-    }
-  })();
-
-  const publicBase = (() => {
-    try {
-      return `${window.location.protocol}//${window.location.hostname}`;
-    } catch {
-      return 'http://139.180.140.143';
-    }
-  })();
 
   const [addr, setAddr] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
@@ -3245,9 +2302,7 @@ const DashboardView = () => {
     }
   };
 
-  useEffect(() => {
-    if (addr) refreshStake();
-  }, [addr]);
+  useEffect(() => { if (addr) refreshStake(); }, [addr]);
 
   useEffect(() => {
     const t = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000);
@@ -3262,11 +2317,7 @@ const DashboardView = () => {
       setBusy('Sending stake tx…');
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner();
-      const c = new ethers.Contract(
-        STAKE_CONTRACT,
-        ['function stake(uint8 tier) payable'],
-        signer
-      );
+      const c = new ethers.Contract(STAKE_CONTRACT, ['function stake(uint8 tier) payable'], signer);
       const v = ethers.parseEther(tiers[tierKey].stake);
       const tx = await c.stake(tiers[tierKey].enum, { value: v });
       await tx.wait();
@@ -3287,11 +2338,7 @@ const DashboardView = () => {
       setBusy('Requesting unstake (sign tx)…');
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner();
-      const c = new ethers.Contract(
-        STAKE_CONTRACT,
-        ['function requestUnstake()'],
-        signer
-      );
+      const c = new ethers.Contract(STAKE_CONTRACT, ['function requestUnstake()'], signer);
       const tx = await c.requestUnstake();
       await tx.wait();
       await refreshStake();
@@ -3311,11 +2358,7 @@ const DashboardView = () => {
       setBusy('Withdrawing stake (sign tx)…');
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner();
-      const c = new ethers.Contract(
-        STAKE_CONTRACT,
-        ['function withdraw()'],
-        signer
-      );
+      const c = new ethers.Contract(STAKE_CONTRACT, ['function withdraw()'], signer);
       const tx = await c.withdraw();
       await tx.wait();
       await refreshStake();
@@ -3335,7 +2378,7 @@ const DashboardView = () => {
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner();
 
-      const nonceRes = await fetch(`${apiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
+      const nonceRes = await fetch(`${adminApiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
       const nonceJson = await nonceRes.json();
       const nonce = nonceJson?.nonce;
       if (!nonce) throw new Error('Failed to get nonce');
@@ -3343,7 +2386,7 @@ const DashboardView = () => {
       const message = `DCAI API Key Request\nAddress: ${addr}\nTier: ${tier}\nNonce: ${nonce}`;
       const signature = await signer.signMessage(message);
 
-      const res = await fetch(`${apiBase}/apikey/request`, {
+      const res = await fetch(`${adminApiBase}/apikey/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: addr, tier, note, signature }),
@@ -3367,7 +2410,7 @@ const DashboardView = () => {
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner();
 
-      const nonceRes = await fetch(`${apiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
+      const nonceRes = await fetch(`${adminApiBase}/auth/nonce?address=${encodeURIComponent(addr)}`);
       const nonceJson = await nonceRes.json();
       const nonce = nonceJson?.nonce;
       if (!nonce) throw new Error('Failed to get nonce');
@@ -3375,7 +2418,7 @@ const DashboardView = () => {
       const message = `DCAI API Key Reveal\nAddress: ${addr}\nNonce: ${nonce}`;
       const signature = await signer.signMessage(message);
 
-      const res = await fetch(`${apiBase}/apikey/reveal`, {
+      const res = await fetch(`${adminApiBase}/apikey/reveal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: addr, signature }),
@@ -3390,12 +2433,10 @@ const DashboardView = () => {
     }
   };
 
-  const endpointFor = (tierKey: string, key: string) => {
-    return {
-      http: `${publicBase}/rpc/${tierKey}/${key}/`,
-      ws: `${publicBase.replace('http', 'ws')}/ws/${tierKey}/${key}/`,
-    };
-  };
+  const endpointFor = (tierKey: string, key: string) => ({
+    http: `${publicBase}/rpc/${tierKey}/${key}/`,
+    ws: `${publicBase.replace('http', 'ws')}/ws/${tierKey}/${key}/`,
+  });
 
   const stakeTierLabel = (() => {
     const t = stake?.tier ?? 0;
@@ -3415,385 +2456,249 @@ const DashboardView = () => {
   })();
 
   const requestedAtSec = (() => {
-    try {
-      return Number(stake?.requestedAt || '0');
-    } catch {
-      return 0;
-    }
+    try { return Number(stake?.requestedAt || '0'); } catch { return 0; }
   })();
 
   const cooldownEndsSec = requestedAtSec > 0 ? (requestedAtSec + 86400) : 0;
   const cooldownLeftSec = cooldownEndsSec > 0 ? (cooldownEndsSec - nowSec) : 0;
 
+  const METHOD_GROUPS: { title: string; items: string[] }[] = [
+    { title: 'web3_*', items: ['web3_clientVersion', 'web3_sha3'] },
+    { title: 'net_*', items: ['net_version', 'net_listening', 'net_peerCount'] },
+    { title: 'eth_* (status / basics)', items: ['eth_protocolVersion', 'eth_syncing', 'eth_coinbase', 'eth_mining', 'eth_hashrate', 'eth_gasPrice', 'eth_feeHistory', 'eth_maxPriorityFeePerGas', 'eth_accounts', 'eth_chainId', 'eth_blockNumber'] },
+    { title: 'eth_* (state / contract)', items: ['eth_getBalance', 'eth_getStorageAt', 'eth_getTransactionCount', 'eth_getCode', 'eth_call', 'eth_estimateGas', 'eth_createAccessList', 'eth_getProof'] },
+    { title: 'eth_* (blocks / txs)', items: ['eth_getBlockByHash', 'eth_getBlockByNumber', 'eth_getTransactionByHash', 'eth_getTransactionReceipt', 'eth_getTransactionByBlockHashAndIndex', 'eth_getTransactionByBlockNumberAndIndex', 'eth_getBlockTransactionCountByHash', 'eth_getBlockTransactionCountByNumber'] },
+    { title: 'eth_* (logs / filters)', items: ['eth_newFilter', 'eth_newBlockFilter', 'eth_newPendingTransactionFilter', 'eth_uninstallFilter', 'eth_getFilterChanges', 'eth_getFilterLogs', 'eth_getLogs'] },
+    { title: 'eth_* (send / sign)', items: ['eth_sign', 'eth_signTransaction', 'eth_sendTransaction', 'eth_sendRawTransaction'] },
+    { title: 'WebSocket only', items: ['eth_subscribe (newHeads / logs / newPendingTransactions)', 'eth_unsubscribe'] },
+  ];
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 pt-8 relative z-10"
-    >
-      <div className="mb-6 flex items-center gap-4">
-        <div className="p-4 bg-cyan-500/10 rounded-xl border border-cyan-500/20 shadow-[0_0_20px_rgba(0,240,255,0.10)]">
-          <Code2 className="w-8 h-8 text-cyan-400" />
-        </div>
-        <div className="min-w-0">
-          <h1 className="text-3xl md:text-4xl font-black tracking-widest">API <span className="glow-text-cyan text-cyan-300">DASHBOARD</span></h1>
-          <div className="mt-2 text-xs font-mono text-gold-500/60">Stake tDCAI → Apply → Admin approve → Get API key</div>
-        </div>
-      </div>
+    <Page>
+      <PageTitle
+        title="API"
+        accent="Dashboard"
+        sub="Stake tDCAI → apply → admin approval → receive an API key for the gated RPC."
+      />
 
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30 mb-8">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-xs font-mono text-gold-500/50">WALLET</div>
-            <div className="mt-1 text-sm font-mono text-cyan-200/90 break-all">{addr || '-- not connected --'}</div>
-            <div className="mt-1 text-[10px] font-mono text-gold-500/40">chainId {chainId ?? '--'} · stake contract {STAKE_CONTRACT}</div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={connect} className="px-3 py-2 rounded-lg border border-cyan-500/20 text-cyan-300 text-xs font-mono hover:border-cyan-400/60">CONNECT</button>
-            <button disabled={!addr} onClick={refreshStake} className={`px-3 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-gold-500/20 text-gold-500/80 hover:border-cyan-500/40 hover:text-cyan-300' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>REFRESH</button>
-          </div>
-        </div>
-
-        {err ? <div className="mt-3 text-[11px] font-mono text-rose-300">{err}</div> : null}
-        {busy ? <div className="mt-3 text-[11px] font-mono text-gold-500/60">{busy}</div> : null}
-      </div>
-
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30 mb-8">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="text-xs font-mono text-gold-500/50">CURRENT STAKE</div>
-            <div className="mt-1 text-sm font-mono text-cyan-200/90">tier <span className="text-cyan-300">{stakeTierLabel}</span> · amount <span className="text-cyan-300">{stakeAmount}</span> tDCAI</div>
-            <div className="mt-1 text-[10px] font-mono text-gold-500/40">unstake cooldown: 24h</div>
-            {requestedAtSec > 0 ? (
-              <div className="mt-2 text-[10px] font-mono text-gold-500/60">
-                requestedAt {requestedAtSec} · withdraw {(cooldownLeftSec <= 0) ? <span className="text-emerald-400">available now</span> : <span className="text-yellow-400">in {Math.max(0, cooldownLeftSec)}s</span>}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <Card>
+          <CardHead
+            title="Wallet"
+            actions={
+              <div className="flex gap-1.5">
+                <Btn tone="primary" onClick={connect}>{addr ? 'Reconnect' : 'Connect wallet'}</Btn>
+                <Btn disabled={!addr} onClick={refreshStake}>Refresh</Btn>
               </div>
-            ) : (
-              <div className="mt-2 text-[10px] font-mono text-gold-500/50">No unstake requested.</div>
-            )}
+            }
+          />
+          <div className="px-4 py-3">
+            <div className="text-[12px] font-mono text-txt break-all">{addr || 'Not connected'}</div>
+            <div className="mt-1 text-[11px] font-mono text-txt-3">
+              chainId {chainId ?? '--'} · stake contract {shortAddr(STAKE_CONTRACT)}
+              <CopyBtn value={STAKE_CONTRACT} label="stake contract" />
+            </div>
+            {err ? <Notice tone="bad">{err}</Notice> : null}
+            {busy ? <Notice tone="neutral">{busy}</Notice> : null}
           </div>
+        </Card>
 
-          <div className="flex gap-2">
-            <button
-              disabled={!addr || stakeTierLabel === 'none' || requestedAtSec > 0}
-              onClick={requestUnstake}
-              className={`px-3 py-2 rounded-lg border text-xs font-mono ${(!addr || stakeTierLabel === 'none' || requestedAtSec > 0) ? 'border-gold-500/10 text-gold-500/30 cursor-not-allowed' : 'border-rose-500/30 text-rose-300 hover:border-rose-400/70'}`}
-            >
-              REQUEST UNSTAKE
-            </button>
-            <button
-              disabled={!addr || requestedAtSec <= 0 || cooldownLeftSec > 0}
-              onClick={withdrawStake}
-              className={`px-3 py-2 rounded-lg border text-xs font-mono ${(!addr || requestedAtSec <= 0 || cooldownLeftSec > 0) ? 'border-gold-500/10 text-gold-500/30 cursor-not-allowed' : 'border-emerald-500/30 text-emerald-300 hover:border-emerald-400/70'}`}
-            >
-              WITHDRAW
-            </button>
+        <Card>
+          <CardHead
+            title="Current stake"
+            actions={
+              <div className="flex gap-1.5">
+                <Btn tone="danger" disabled={!addr || stakeTierLabel === 'none' || requestedAtSec > 0} onClick={requestUnstake}>Request unstake</Btn>
+                <Btn tone="ok" disabled={!addr || requestedAtSec <= 0 || cooldownLeftSec > 0} onClick={withdrawStake}>Withdraw</Btn>
+              </div>
+            }
+          />
+          <div className="px-4 py-3">
+            <div className="text-[13px] font-mono">
+              tier <span className="text-gold font-semibold">{stakeTierLabel}</span> · <span className="text-gold">{stakeAmount}</span> {NATIVE_SYMBOL}
+            </div>
+            <div className="mt-1 text-[11px] font-mono text-txt-3">
+              {requestedAtSec > 0
+                ? (cooldownLeftSec <= 0
+                  ? 'Unstake requested — withdrawal available now.'
+                  : `Unstake requested — withdrawal in ${Math.max(0, cooldownLeftSec)}s.`)
+                : 'No unstake requested · cooldown 24h.'}
+            </div>
+            <div className="mt-1 text-[11px] text-txt-3">Keys stay valid while staked; revoke on withdraw is currently manual.</div>
           </div>
-        </div>
-
-        <div className="mt-3 text-[10px] font-mono text-gold-500/40">
-          If you withdraw, we can revoke your API key (policy: key valid while staked). For now revoke is manual from /admin.
-        </div>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        {(['basic','pro','ultra'] as const).map((k) => (
-          <div key={k} className="rounded-2xl border border-gold-500/15 bg-dark-900/40 p-5">
-            <div className="text-xs font-mono text-gold-500/50">{tiers[k].label.toUpperCase()}</div>
-            <div className="mt-2 text-lg font-mono text-cyan-200/90">Stake {tiers[k].stake} tDCAI</div>
-            <div className="mt-1 text-[10px] font-mono text-gold-500/40">limit {tiers[k].rate} · burst {tiers[k].burst}</div>
-            <button
-              disabled={!addr}
-              onClick={() => { setTier(k); doStake(k); }}
-              className={`mt-4 w-full px-3 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-cyan-500/20 text-cyan-300 hover:border-cyan-400/60' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}
-            >
-              STAKE & SELECT
-            </button>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        {(['basic', 'pro', 'ultra'] as const).map((k) => (
+          <div
+            key={k}
+            className={`rounded-xl border p-4 transition-colors ${tier === k ? 'border-gold/50 bg-gold/5' : 'border-line bg-ink-800'}`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] uppercase tracking-wider text-txt-3">{tiers[k].label}</div>
+              {tier === k ? <Badge tone="gold">selected</Badge> : null}
+            </div>
+            <div className="mt-1.5 text-lg font-mono text-txt tnum">{fmtNum(tiers[k].stake)} <span className="text-[12px] text-txt-3">{NATIVE_SYMBOL}</span></div>
+            <div className="mt-0.5 text-[11px] font-mono text-txt-3">{tiers[k].rate} · burst {tiers[k].burst}</div>
+            <div className="mt-3 flex gap-1.5">
+              <Btn tone={tier === k ? 'primary' : 'ghost'} className="flex-1" disabled={!addr} onClick={() => { setTier(k); doStake(k); }}>
+                Stake & select
+              </Btn>
+              <Btn onClick={() => setTier(k)}>Select</Btn>
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30 mb-8">
-        <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-gold-500">
-          <CheckCircle2 className="w-5 h-5" /> APPLY
-        </h2>
-        <div className="mt-2 text-xs font-mono text-gold-500/60">Selected tier: <span className="text-cyan-300">{tier}</span></div>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Tell us your intended usage (optional)…"
-          className="mt-4 w-full min-h-[90px] bg-dark-900/50 border border-gold-500/15 rounded-xl p-3 text-xs font-mono text-gold-500/80 outline-none"
+      <Card className="mb-4">
+        <CardHead title="Apply for a key" meta={`selected tier: ${tier}`} />
+        <div className="px-4 py-3">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Tell us your intended usage (optional)…"
+            className="w-full min-h-[80px] bg-ink-900 border border-line rounded-lg p-3 text-[12px] font-mono text-txt outline-none focus:border-gold/50 transition-colors"
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Btn tone="primary" disabled={!addr} onClick={requestApiKey}>Submit request</Btn>
+            <Btn disabled={!addr} onClick={revealMyKeys}>Reveal my keys</Btn>
+          </div>
+          {lastReq ? (
+            <pre className="mt-3 rounded-lg border border-line bg-ink-900 p-3 text-[10px] font-mono text-txt-2 whitespace-pre-wrap break-all max-h-40 overflow-auto">{JSON.stringify(lastReq, null, 2)}</pre>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card>
+        <CardHead
+          title="Endpoints & docs"
+          meta={`chainId ${CHAIN_ID} · ${NATIVE_SYMBOL}`}
+          actions={
+            <div className="flex items-center gap-1.5">
+              <Btn tone={docsTab === 'dapp' ? 'primary' : 'ghost'} onClick={() => setDocsTab('dapp')}>dApp</Btn>
+              <Btn tone={docsTab === 'ops' ? 'primary' : 'ghost'} onClick={() => setDocsTab('ops')}>Ops</Btn>
+            </div>
+          }
         />
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button disabled={!addr} onClick={requestApiKey} className={`px-4 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-cyan-500/20 text-cyan-300 hover:border-cyan-400/60' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>SUBMIT REQUEST</button>
-          <button disabled={!addr} onClick={revealMyKeys} className={`px-4 py-2 rounded-lg border text-xs font-mono ${addr ? 'border-gold-500/20 text-gold-500/80 hover:border-cyan-500/40 hover:text-cyan-300' : 'border-gold-500/10 text-gold-500/30 cursor-not-allowed'}`}>REVEAL MY KEYS</button>
-        </div>
-
-        {lastReq ? (
-          <pre className="mt-4 text-[10px] font-mono text-gold-500/60 whitespace-pre-wrap break-all">{JSON.stringify(lastReq, null, 2)}</pre>
-        ) : null}
-      </div>
-
-      <div className="glow-box bg-dark-800/60 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-cyan-500/30">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="text-lg font-bold tracking-widest flex items-center gap-2 text-cyan-400">
-            <Code2 className="w-5 h-5" /> ENDPOINTS
-          </h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setDocsTab('dapp')}
-              className={`px-3 py-1.5 rounded-lg border text-[10px] font-mono ${docsTab === 'dapp' ? 'border-cyan-400/60 text-cyan-200 bg-cyan-500/10' : 'border-gold-500/15 text-gold-500/60 hover:border-cyan-500/30 hover:text-cyan-300'}`}
-            >
-              DAPP (ethers/viem)
-            </button>
-            <button
-              onClick={() => setDocsTab('ops')}
-              className={`px-3 py-1.5 rounded-lg border text-[10px] font-mono ${docsTab === 'ops' ? 'border-cyan-400/60 text-cyan-200 bg-cyan-500/10' : 'border-gold-500/15 text-gold-500/60 hover:border-cyan-500/30 hover:text-cyan-300'}`}
-            >
-              OPS (curl/cast/web3.py)
-            </button>
-          </div>
-        </div>
-        <div className="mt-2 text-[10px] font-mono text-gold-500/50">chainId <span className="text-cyan-300">18441</span> · native <span className="text-cyan-300">tDCAI</span></div>
-
-        <details className="mt-4 rounded-xl border border-gold-500/10 bg-dark-950/30 p-4">
-          <summary className="cursor-pointer select-none text-[10px] font-mono text-gold-500/60 hover:text-cyan-300">
-            Supported Ethereum JSON-RPC methods
-          </summary>
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px] font-mono">
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">web3_*</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>web3_clientVersion</div>
-                <div>web3_sha3</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">net_*</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>net_version</div>
-                <div>net_listening</div>
-                <div>net_peerCount</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (node status / basics)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_protocolVersion</div>
-                <div>eth_syncing</div>
-                <div>eth_coinbase</div>
-                <div>eth_mining</div>
-                <div>eth_hashrate</div>
-                <div>eth_gasPrice</div>
-                <div>eth_feeHistory</div>
-                <div>eth_maxPriorityFeePerGas</div>
-                <div>eth_accounts</div>
-                <div>eth_chainId</div>
-                <div>eth_blockNumber</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (state / account / contract)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_getBalance</div>
-                <div>eth_getStorageAt</div>
-                <div>eth_getTransactionCount</div>
-                <div>eth_getCode</div>
-                <div>eth_call</div>
-                <div>eth_estimateGas</div>
-                <div>eth_createAccessList</div>
-                <div>eth_getProof</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (blocks / tx lookup)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_getBlockByHash</div>
-                <div>eth_getBlockByNumber</div>
-                <div>eth_getTransactionByHash</div>
-                <div>eth_getTransactionReceipt</div>
-                <div>eth_getTransactionByBlockHashAndIndex</div>
-                <div>eth_getTransactionByBlockNumberAndIndex</div>
-                <div>eth_getBlockTransactionCountByHash</div>
-                <div>eth_getBlockTransactionCountByNumber</div>
-                <div>eth_getUncleCountByBlockHash</div>
-                <div>eth_getUncleCountByBlockNumber</div>
-                <div>eth_getUncleByBlockHashAndIndex</div>
-                <div>eth_getUncleByBlockNumberAndIndex</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (logs / filters)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_newFilter</div>
-                <div>eth_newBlockFilter</div>
-                <div>eth_newPendingTransactionFilter</div>
-                <div>eth_uninstallFilter</div>
-                <div>eth_getFilterChanges</div>
-                <div>eth_getFilterLogs</div>
-                <div>eth_getLogs</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3">
-              <div className="text-gold-500/50">eth_* (send / sign / mining work)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_sign</div>
-                <div>eth_signTransaction</div>
-                <div>eth_sendTransaction</div>
-                <div>eth_sendRawTransaction</div>
-                <div>eth_getWork</div>
-                <div>eth_submitWork</div>
-                <div>eth_submitHashrate</div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gold-500/10 bg-dark-900/30 p-3 md:col-span-2">
-              <div className="text-gold-500/50">WS only (PubSub)</div>
-              <div className="mt-2 text-gold-500/70 space-y-1">
-                <div>eth_subscribe (newHeads / logs / newPendingTransactions)</div>
-                <div>eth_unsubscribe</div>
-              </div>
-              <div className="mt-3 text-[10px] text-gold-500/40">
-                Not public by default: <span className="text-gold-500/50">debug_*, admin_*, personal_*, txpool_*, trace_*</span>
-              </div>
-            </div>
-          </div>
-        </details>
-
-        {revealedKeys && revealedKeys.length ? (
-          <div className="mt-4 space-y-3">
-            {revealedKeys.map((k, i) => {
-              const e = endpointFor(String(k.tier), String(k.key));
-              return (
-                <div key={i} className="rounded-xl border border-cyan-500/15 bg-dark-900/40 p-4">
-                  <div className="text-xs font-mono text-gold-500/60">tier <span className="text-cyan-300">{k.tier}</span></div>
-                  <div className="mt-1 text-[11px] font-mono text-gold-500/70 break-all">key {k.key}</div>
-                  <div className="mt-2 text-[10px] font-mono text-gold-500/50">
-                    usage today <span className="text-cyan-200/90">{k?.usage?.today ?? '--'}</span> · last 5m <span className="text-cyan-200/90">{k?.usage?.last5m ?? '--'}</span> · last 60m <span className="text-cyan-200/90">{k?.usage?.last60m ?? '--'}</span>
-                    <div className="mt-1 text-gold-500/50">
-                      status (60m)
-                      {' '}2xx <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['2xx'] ?? 0}</span>
-                      {' '}· 4xx <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['4xx'] ?? 0}</span>
-                      {' '}· 5xx <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['5xx'] ?? 0}</span>
-                      {' '}· 401 <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['401'] ?? 0}</span>
-                      {' '}· 429 <span className="text-cyan-200/90">{k?.usage?.statusLast60m?.['429'] ?? 0}</span>
-                    </div>
-                    <div className="mt-1 text-gold-500/50">
-                      latency (60m)
-                      {' '}p50 <span className="text-cyan-200/90">{k?.usage?.latencyLast60m?.p50Ms ?? '--'}</span>ms
-                      {' '}· p95 <span className="text-cyan-200/90">{k?.usage?.latencyLast60m?.p95Ms ?? '--'}</span>ms
-                    </div>
-                    <div className="mt-1 text-gold-500/50">
-                      top methods (60m)
-                      {Array.isArray(k?.usage?.topMethodsLast60m) && k.usage.topMethodsLast60m.length ? (
-                        <span className="text-cyan-200/90">{' '}{k.usage.topMethodsLast60m.slice(0, 6).map((m: any) => `${m.method}:${m.count}`).join(' · ')}</span>
-                      ) : (
-                        <span className="text-cyan-200/90"> --</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-3 text-[11px] font-mono text-gold-500/60">HTTP</div>
-                  <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.http}</div>
-                  <div className="mt-2 text-[11px] font-mono text-gold-500/60">WS</div>
-                  <div className="text-[11px] font-mono text-cyan-200/90 break-all">{e.ws}</div>
-
-                  <div className="mt-4 rounded-xl border border-gold-500/10 bg-dark-950/30 p-3">
-                    <div className="text-[10px] font-mono text-gold-500/50">Quickstart ({docsTab})</div>
-                    <pre className="mt-2 text-[10px] font-mono text-gold-500/70 whitespace-pre-wrap break-all">
-{docsTab === 'dapp'
-? `// ethers v6\nimport { ethers } from \"ethers\";\n\nconst provider = new ethers.JsonRpcProvider(\"${e.http}\", 18441);\nconsole.log(await provider.getBlockNumber());\n\n// viem\nimport { createPublicClient, http } from \"viem\";\n\nconst client = createPublicClient({\n  chain: { id: 18441, name: \"DCAI L3\", nativeCurrency: { name: \"tDCAI\", symbol: \"tDCAI\", decimals: 18 }, rpcUrls: { default: { http: [\"${e.http}\"] } } },\n  transport: http(\"${e.http}\"),\n});\nconsole.log(await client.getBlockNumber());`
-: `# curl (eth_chainId)\ncurl -s \"${e.http}\" \\\n  -H 'content-type: application/json' \\\n  --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}'\n\n# Foundry cast\ncast chain-id --rpc-url \"${e.http}\"\ncast block-number --rpc-url \"${e.http}\"\n\n# web3.py\nfrom web3 import Web3\nw3 = Web3(Web3.HTTPProvider(\"${e.http}\"))\nprint(w3.eth.chain_id)\nprint(w3.eth.block_number)`}
-                    </pre>
+        <div className="px-4 py-3">
+          <details className="rounded-lg border border-line bg-ink-900 p-3">
+            <summary className="cursor-pointer select-none text-[11px] font-mono text-txt-2 hover:text-txt">
+              Supported Ethereum JSON-RPC methods
+            </summary>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] font-mono">
+              {METHOD_GROUPS.map((g) => (
+                <div key={g.title} className="rounded-lg border border-line/60 bg-ink-800 p-3">
+                  <div className="text-txt-3">{g.title}</div>
+                  <div className="mt-1.5 text-txt-2 space-y-0.5">
+                    {g.items.map((m) => <div key={m}>{m}</div>)}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="mt-4 text-xs font-mono text-gold-500/60">No active keys revealed yet.</div>
-        )}
-      </div>
-    </motion.div>
+              ))}
+              <div className="md:col-span-2 text-[10px] text-txt-3">
+                Not public by default: debug_*, admin_*, personal_*, txpool_*, trace_*
+              </div>
+            </div>
+          </details>
+
+          {revealedKeys && revealedKeys.length ? (
+            <div className="mt-3 space-y-3">
+              {revealedKeys.map((k, i) => {
+                const e = endpointFor(String(k.tier), String(k.key));
+                const u = k?.usage || {};
+                return (
+                  <div key={i} className="rounded-lg border border-line bg-ink-900 p-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="text-[12px] font-mono">
+                        <Badge tone="gold">{String(k.tier)}</Badge>{' '}
+                        <span className="text-txt break-all">{String(k.key)}</span>
+                        <CopyBtn value={String(k.key)} label="API key" />
+                      </div>
+                      <div className="text-[10px] font-mono text-txt-3">
+                        today {u?.today ?? '--'} · 5m {u?.last5m ?? '--'} · 60m {u?.last60m ?? '--'}
+                      </div>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] font-mono text-txt-3">
+                      <div>
+                        status 60m: 2xx <span className="text-txt-2">{u?.statusLast60m?.['2xx'] ?? 0}</span> · 4xx <span className="text-txt-2">{u?.statusLast60m?.['4xx'] ?? 0}</span> · 5xx <span className="text-txt-2">{u?.statusLast60m?.['5xx'] ?? 0}</span> · 429 <span className="text-txt-2">{u?.statusLast60m?.['429'] ?? 0}</span>
+                      </div>
+                      <div>
+                        latency 60m: p50 <span className="text-txt-2">{u?.latencyLast60m?.p50Ms ?? '--'}ms</span> · p95 <span className="text-txt-2">{u?.latencyLast60m?.p95Ms ?? '--'}ms</span>
+                      </div>
+                      {Array.isArray(u?.topMethodsLast60m) && u.topMethodsLast60m.length ? (
+                        <div className="sm:col-span-2">
+                          top: {u.topMethodsLast60m.slice(0, 6).map((m: any) => `${m.method}:${m.count}`).join(' · ')}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 gap-1.5 text-[11px] font-mono">
+                      <div className="flex items-center gap-2">
+                        <span className="text-txt-3 w-10">HTTP</span>
+                        <span className="text-cyan break-all">{e.http}</span>
+                        <CopyBtn value={e.http} label="HTTP endpoint" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-txt-3 w-10">WS</span>
+                        <span className="text-cyan break-all">{e.ws}</span>
+                        <CopyBtn value={e.ws} label="WS endpoint" />
+                      </div>
+                    </div>
+
+                    <pre className="mt-3 rounded-lg border border-line/60 bg-ink-950 p-3 text-[10px] font-mono text-txt-2 whitespace-pre-wrap break-all overflow-auto max-h-64">
+{docsTab === 'dapp'
+? `// ethers v6\nimport { ethers } from "ethers";\n\nconst provider = new ethers.JsonRpcProvider("${e.http}", ${CHAIN_ID});\nconsole.log(await provider.getBlockNumber());\n\n// viem\nimport { createPublicClient, http } from "viem";\n\nconst client = createPublicClient({\n  chain: { id: ${CHAIN_ID}, name: "DCAI L3", nativeCurrency: { name: "${NATIVE_SYMBOL}", symbol: "${NATIVE_SYMBOL}", decimals: 18 }, rpcUrls: { default: { http: ["${e.http}"] } } },\n  transport: http("${e.http}"),\n});\nconsole.log(await client.getBlockNumber());`
+: `# curl (eth_chainId)\ncurl -s "${e.http}" \\\n  -H 'content-type: application/json' \\\n  --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'\n\n# Foundry cast\ncast chain-id --rpc-url "${e.http}"\ncast block-number --rpc-url "${e.http}"\n\n# web3.py\nfrom web3 import Web3\nw3 = Web3(Web3.HTTPProvider("${e.http}"))\nprint(w3.eth.chain_id)\nprint(w3.eth.block_number)`}
+                    </pre>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-3 text-[12px] text-txt-3">No active keys revealed yet — connect a wallet and use “Reveal my keys”.</div>
+          )}
+        </div>
+      </Card>
+    </Page>
   );
 };
 
+/* ------------------------------------ App ------------------------------------ */
+
 export default function App() {
-  const [currentView, setCurrentView] = useState<'home' | 'blocks' | 'txs' | 'block' | 'tx' | 'address' | 'tokens' | 'token' | 'contributors' | 'dashboard'>('home');
+  const [currentView, setCurrentView] = useState<ViewKey>('home');
   const [selectedBlock, setSelectedBlock] = useState<any>(null);
   const [selectedTxHash, setSelectedTxHash] = useState<string | null>(null);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [selectedTokenAddress, setSelectedTokenAddress] = useState<string | null>(null);
 
-  // Basic client-side routing for direct URL opens (/tx/<hash>, /block/<height>)
   useEffect(() => {
     const applyRouteFromPath = () => {
       try {
         const path = window.location.pathname || '/';
 
-        if (path === '/blocks' || path === '/blocks/') {
-          setCurrentView('blocks');
-          return;
-        }
-
-        if (path === '/txs' || path === '/txs/') {
-          setCurrentView('txs');
-          return;
-        }
-
-        if (path === '/tokens' || path === '/tokens/') {
-          setCurrentView('tokens');
-          return;
-        }
-
-        if (path === '/dashboard' || path === '/dashboard/') {
-          setCurrentView('dashboard');
-          return;
-        }
-
-        if (path === '/contributors' || path === '/contributors/' || path === '/nodes' || path === '/nodes/') {
-          setCurrentView('contributors');
-          return;
-        }
+        if (path === '/blocks' || path === '/blocks/') { setCurrentView('blocks'); return; }
+        if (path === '/txs' || path === '/txs/') { setCurrentView('txs'); return; }
+        if (path === '/tokens' || path === '/tokens/') { setCurrentView('tokens'); return; }
+        if (path === '/dashboard' || path === '/dashboard/') { setCurrentView('dashboard'); return; }
+        if (path === '/contributors' || path === '/contributors/' || path === '/nodes' || path === '/nodes/') { setCurrentView('contributors'); return; }
 
         const txm = path.match(/^\/tx\/(0x[0-9a-fA-F]{64})/);
-        if (txm) {
-          setSelectedTxHash(txm[1]);
-          setCurrentView('tx');
-          return;
-        }
+        if (txm) { setSelectedTxHash(txm[1]); setCurrentView('tx'); return; }
 
         const bm = path.match(/^\/block\/(\d+)/);
         if (bm) {
           const h = parseInt(bm[1], 10);
-          if (Number.isFinite(h)) {
-            setSelectedBlock({ height: h });
-            setCurrentView('block');
-            return;
-          }
+          if (Number.isFinite(h)) { setSelectedBlock({ height: h }); setCurrentView('block'); return; }
         }
 
         const tokm = path.match(/^\/token\/(0x[0-9a-fA-F]{40})/);
-        if (tokm) {
-          setSelectedTokenAddress(tokm[1]);
-          setCurrentView('token');
-          return;
-        }
+        if (tokm) { setSelectedTokenAddress(tokm[1]); setCurrentView('token'); return; }
 
         const am = path.match(/^\/address\/(0x[0-9a-fA-F]{40})/);
-        if (am) {
-          setSelectedAddress(am[1]);
-          setCurrentView('address');
-          return;
-        }
+        if (am) { setSelectedAddress(am[1]); setCurrentView('address'); return; }
       } catch {}
-      // default
       setCurrentView('home');
     };
 
@@ -3801,95 +2706,36 @@ export default function App() {
     window.addEventListener('popstate', applyRouteFromPath);
     return () => window.removeEventListener('popstate', applyRouteFromPath);
   }, []);
-  
-  const [blocks, setBlocks] = useState<ReturnType<typeof generateBlock>[]>([]);
+
+  const [blocks, setBlocks] = useState<any[]>([]);
   const [txs, setTxs] = useState<any[]>([]);
-  const [expandedTx, setExpandedTx] = useState<string | null>(null);
-  const [copyToast, setCopyToast] = useState<string | null>(null);
-  const blockHeightRef = useRef(29402934);
 
-  // INCOMING block timing helpers
-  const [avgBlockMs, setAvgBlockMs] = useState<number>(2000);
-  const latestHeightRef = useRef<number | null>(null);
-  const lastNewBlockAtRef = useRef<number>(Date.now());
-
-  // Cache clique recents mapping so the validator label doesn't flicker to "--" on transient RPC errors.
   const cliqueRecentsRef = useRef<Record<string, string>>({});
-  // Cache resolved signer per height (Clique recents only covers a tiny window).
   const signerByHeightRef = useRef<Record<number, string>>({});
   const signerInflightRef = useRef<Set<number>>(new Set());
-
-
-  const timeAgo = (iso?: string) => {
-    try {
-      if (!iso) return '';
-      const ms = Date.now() - new Date(iso).getTime();
-      const m = Math.floor(ms / 60000);
-      if (m < 1) return 'just now';
-      if (m < 60) return String(m) + 'm ago';
-      const h = Math.floor(m / 60);
-      if (h < 24) return String(h) + 'h ago';
-      const d = Math.floor(h / 24);
-      return String(d) + 'd ago';
-    } catch {
-      return '';
-    }
-  };
-
-  // (Removed 100ms countdown state updates; it caused constant re-renders and could make the desktop header feel unclickable.)
+  const latestHeightRef = useRef<number | null>(null);
+  const seenTxRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
 
-    const formatTDCAI = (weiLike: any, dp = 6) => {
-      try {
-        const wei = BigInt(String(weiLike ?? '0'));
-        const s = wei.toString();
-        const pad = s.length <= 18 ? '0'.repeat(18 - s.length + 1) + s : s;
-        const head = pad.slice(0, -18);
-        const tail = pad.slice(-18);
-        return `${head}.${tail.slice(0, dp)}`;
-      } catch {
-        return '--';
-      }
-    };
-
     const fetchBlocks = async () => {
       try {
-        const res = await fetch('/api/v2/blocks?type=block&limit=15', { cache: 'no-store' });
-        if (res.status === 429) return;
-        const data = await res.json();
+        const data = await bs('/blocks?type=block&limit=15');
+        if (!data) return;
         const apiItems = (data?.items || []).slice(0, 15);
 
-        // Clique snapshot for real signer per block (cached to avoid flicker on transient RPC issues)
         let recents: Record<string, string> = cliqueRecentsRef.current || {};
         try {
-          const snapRes = await fetch('/rpc1/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'clique_getSnapshot', params: ['latest'] }),
-          });
-          const snap = await snapRes.json();
-          const next = snap?.result?.recents;
+          const snap = await rpc('clique_getSnapshot', ['latest']);
+          const next = snap?.recents;
           if (next && typeof next === 'object' && Object.keys(next).length) {
             cliqueRecentsRef.current = next as Record<string, string>;
             recents = next as Record<string, string>;
           }
         } catch {}
 
-        const short = (addr: string) => (addr ? (addr.slice(0, 6) + '…' + addr.slice(-4)) : '--');
-
-        const fmt = (weiLike: any, dp = 2) => {
-          try {
-            const wei = BigInt(String(weiLike ?? '0'));
-            const s = wei.toString();
-            const head = s.length > 18 ? s.slice(0, -18) : '0';
-            const tail = s.length > 18 ? s.slice(-18) : s.padStart(18, '0');
-            return head + '.' + tail.slice(0, dp);
-          } catch {
-            return '--';
-          }
-        };
+        const prevTop = latestHeightRef.current;
 
         const items = apiItems.map((b: any) => {
           const height = Number(b.height);
@@ -3898,47 +2744,30 @@ export default function App() {
           return {
             height,
             hash: b.hash,
-            miner: signer ? short(signer) : '--',
+            miner: signer ? shortAddr(signer) : '--',
             validator: signer || '',
             txCount: Number(b.transaction_count ?? 0),
             timestamp: b.timestamp,
-            time: b.timestamp ? new Date(b.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '--',
-            reward: fmt(rewardWei, 2),
-            rewardWei: String(rewardWei ?? '0'),
+            reward: fmtWei(rewardWei, 4),
             gasUsed: b.gas_used,
             gasLimit: b.gas_limit,
             baseFeePerGas: b.base_fee_per_gas,
+            _new: prevTop != null && height > prevTop,
           };
         });
 
         if (!cancelled) {
-          // Estimate avg block time from the newest two blocks when possible
-          try {
-            if (items.length >= 2 && items[0]?.timestamp && items[1]?.timestamp) {
-              const t0 = new Date(items[0].timestamp).getTime();
-              const t1 = new Date(items[1].timestamp).getTime();
-              const dt = Math.abs(t0 - t1);
-              if (Number.isFinite(dt) && dt > 500 && dt < 20000) setAvgBlockMs(dt);
-            }
-          } catch {}
-
-          // If a new block arrived, reset the incoming countdown
           const newest = items[0];
           if (newest && typeof newest.height === 'number') {
-            if (latestHeightRef.current == null) {
+            if (latestHeightRef.current == null || newest.height > latestHeightRef.current) {
               latestHeightRef.current = newest.height;
-              lastNewBlockAtRef.current = Date.now();
-            } else if (newest.height > latestHeightRef.current) {
-              latestHeightRef.current = newest.height;
-              lastNewBlockAtRef.current = Date.now();
             }
           }
 
           setBlocks(items);
 
-          // Resolve signer for blocks outside Clique "recents" window (do it once per height, cached)
           const missingHeights = Array.from(
-            new Set(
+            new Set<number>(
               items
                 .map((x: any) => Number(x.height))
                 .filter(
@@ -3956,37 +2785,26 @@ export default function App() {
           if (toFetch.length) {
             (async () => {
               const updates: Record<number, string> = {};
-
               for (const h of toFetch) {
                 try {
                   const hex = '0x' + h.toString(16);
-                  const snapRes = await fetch('/rpc1/', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'clique_getSnapshot', params: [hex] }),
-                  });
-                  const snap = await snapRes.json();
-                  const signer = String(snap?.result?.recents?.[String(h)] || '').toLowerCase();
+                  const snap = await rpc('clique_getSnapshot', [hex]);
+                  const signer = String(snap?.recents?.[String(h)] || '').toLowerCase();
                   if (signer) updates[h] = signer;
                 } catch {
-                  // ignore
                 } finally {
                   signerInflightRef.current.delete(h);
                 }
               }
-
               const ks = Object.keys(updates);
               if (!ks.length) return;
-
               for (const k of ks) signerByHeightRef.current[Number(k)] = updates[Number(k)];
-
               if (!cancelled) {
-                const short = (addr: string) => (addr ? addr.slice(0, 6) + '…' + addr.slice(-4) : '--');
                 setBlocks((prev) =>
                   (prev || []).map((b: any) => {
                     const s = updates[Number(b.height)];
                     if (!s) return b;
-                    return { ...b, validator: s, miner: short(s) };
+                    return { ...b, validator: s, miner: shortAddr(s) };
                   })
                 );
               }
@@ -3998,65 +2816,40 @@ export default function App() {
 
     const fetchTxs = async () => {
       try {
-        const res = await fetch('/api/v2/transactions?limit=15', { cache: 'no-store' });
-        if (res.status === 429) return;
-        const data = await res.json();
+        const data = await bs('/transactions?limit=15');
+        if (!data) return;
         const items = (data?.items || []).slice(0, 15).map((tx: any) => ({
           hash: tx.hash,
           result: tx.result || tx.status || '--',
-          method: tx.method || (tx.transaction_types?.[0] || 'txn'),
-          type: tx.type,
-          nonce: tx.nonce,
-          position: tx.position,
+          method: methodLabel(tx),
           from: tx.from?.hash || tx.from || '--',
-          to: tx.to?.hash || tx.to || '--',
-          valueWei: String(tx.value ?? '0'),
-          value: formatTDCAI(tx.value),
-          feeWei: String(tx.fee?.value ?? tx.fee ?? '0'),
-          fee: formatTDCAI(tx.fee?.value ?? tx.fee ?? '0'),
-          gasLimit: String(tx.gas_limit ?? '--'),
-          gasUsed: String(tx.gas_used ?? '--'),
-          baseFeePerGas: String(tx.base_fee_per_gas ?? '--'),
-          gasPrice: String(tx.gas_price ?? '--'),
+          to: tx.created_contract?.hash || tx.to?.hash || tx.to || '--',
+          value: fmtWei(tx.value),
+          fee: fmtWei(tx.fee?.value ?? tx.fee ?? '0'),
           timestamp: tx.timestamp,
-          time: tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString('en-US', { hour12: false }) : '--',
+          _new: seenTxRef.current.size > 0 && !seenTxRef.current.has(String(tx.hash)),
         }));
+        items.forEach((t: any) => seenTxRef.current.add(String(t.hash)));
         if (!cancelled) setTxs(items);
       } catch {}
     };
 
-    // Faster new-block detection: poll eth_blockNumber and refresh blocks immediately on change
     let lastBn: number | null = null;
     const pollBlockNumber = async () => {
-      try {
-        const r = await fetch('/rpc1/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
-          cache: 'no-store',
-        });
-        const j = await r.json();
-        const hex = j?.result;
-        if (typeof hex === 'string' && hex.startsWith('0x')) {
-          const bn = parseInt(hex, 16);
-          if (Number.isFinite(bn)) {
-            if (lastBn == null) lastBn = bn;
-            if (bn > (lastBn ?? 0)) {
-              lastBn = bn;
-              fetchBlocks();
-            }
-          }
+      const bn = await rpcBlockNumber();
+      if (bn != null) {
+        if (lastBn == null) lastBn = bn;
+        if (bn > (lastBn ?? 0)) {
+          lastBn = bn;
+          fetchBlocks();
         }
-      } catch {}
+      }
     };
 
     pollBlockNumber();
     const bnInt = setInterval(pollBlockNumber, 1000);
-
     fetchBlocks();
     fetchTxs();
-
-    // Fallback refresh (new blocks are mainly detected via eth_blockNumber polling above)
     const bInt = setInterval(fetchBlocks, 8000);
     const tInt = setInterval(fetchTxs, 3000);
 
@@ -4076,316 +2869,46 @@ export default function App() {
     } catch {}
   };
 
+  const handleViewBlockH = (h: number) => {
+    setSelectedBlock({ height: h });
+    setCurrentView('block');
+    try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {}
+  };
+
   const handleViewTx = (hash: string) => {
     setSelectedTxHash(hash);
     setCurrentView('tx');
-    try {
-      window.history.pushState({ view: 'tx', hash }, '', `/tx/${hash}`);
-    } catch {}
+    try { window.history.pushState({ view: 'tx', hash }, '', `/tx/${hash}`); } catch {}
   };
 
   const handleViewAddress = (addr: string) => {
     setSelectedAddress(addr);
     setCurrentView('address');
-    try {
-      window.history.pushState({ view: 'address', address: addr }, '', `/address/${addr}`);
-    } catch {}
+    try { window.history.pushState({ view: 'address', address: addr }, '', `/address/${addr}`); } catch {}
   };
 
   const handleViewToken = (addr: string) => {
     setSelectedTokenAddress(addr);
     setCurrentView('token');
-    try {
-      window.history.pushState({ view: 'token', address: addr }, '', `/token/${addr}`);
-    } catch {}
+    try { window.history.pushState({ view: 'token', address: addr }, '', `/token/${addr}`); } catch {}
   };
 
   return (
-    <div className="min-h-screen bg-dark-900 text-gold-500 font-sans selection:bg-cyan-500 selection:text-dark-900 relative overflow-x-hidden">
-      <AnimatePresence>
-        {copyToast ? (
-          <motion.div
-            key="copytoast"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            transition={{ duration: 0.18 }}
-            className="fixed bottom-6 right-6 z-50 px-4 py-2 rounded-lg bg-dark-900/80 border border-cyan-500/30 backdrop-blur-md text-xs font-mono text-cyan-300 shadow-[0_0_20px_rgba(0,240,255,0.15)]"
-          >
-            {copyToast}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-      <div className="hex-bg" />
-      <CursorFollower />
-      <div className="scanline" />
-      <div className="perspective-grid" />
-      
-      <Header
-        active={currentView}
-        onHome={() => { setCurrentView('home'); try { window.history.pushState({ view: 'home' }, '', '/'); } catch {} }}
-        onBlocks={() => { setCurrentView('blocks'); try { window.history.pushState({ view: 'blocks' }, '', '/blocks'); } catch {} }}
-        onTxs={() => { setCurrentView('txs'); try { window.history.pushState({ view: 'txs' }, '', '/txs'); } catch {} }}
-        onTokens={() => { setCurrentView('tokens'); try { window.history.pushState({ view: 'tokens' }, '', '/tokens'); } catch {} }}
-        onContributors={() => { setCurrentView('contributors'); try { window.history.pushState({ view: 'contributors' }, '', '/contributors'); } catch {} }}
-        onDashboard={() => { setCurrentView('dashboard'); try { window.history.pushState({ view: 'dashboard' }, '', '/dashboard'); } catch {} }}
-      />
-      
-      <AnimatePresence mode="wait">
+    <div className="min-h-screen bg-ink-950 text-txt font-sans relative overflow-x-hidden">
+      <div className="brand-wash" />
+
+      <Header active={currentView} />
+      <SearchBar />
+
+      <>
         {currentView === 'home' ? (
-          <motion.main 
-            key="home"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20"
-          >
-            <Hero />
-            <Stats />
-            
-            <div className="mb-12 relative z-10">
-              <h2 className="text-xl font-bold tracking-widest flex items-center gap-2 mb-6 px-4">
-                <Box className="w-5 h-5 text-cyan-400" />
-                LATEST BLOCKS
-              </h2>
-              
-              <div className="flex overflow-x-auto gap-8 pb-12 pt-4 px-4 snap-x hide-scrollbar relative items-center">
-                {/* Animated Chain Background */}
-                <div className="absolute top-1/2 left-0 w-full h-1 bg-dark-800 -translate-y-1/2 z-0 overflow-hidden rounded-full">
-                  <motion.div 
-                    className="h-full w-1/3 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"
-                    animate={{ x: ['-100%', '300%'] }}
-                    transition={{ duration: 2.5, repeat: Infinity, ease: "linear" }}
-                  />
-                </div>
-                
-                <AnimatePresence mode="popLayout">
-                  {/* Incoming block placeholder (left-most) */}
-                  <motion.div
-                    key="incoming"
-                    layout
-                    initial={{ opacity: 0, x: -20, scale: 0.95 }}
-                    animate={{ opacity: 1, x: 0, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ type: 'spring', stiffness: 140, damping: 24, mass: 0.9 }}
-                    className="shrink-0 w-44 sm:w-52 snap-center relative z-10"
-                  >
-                    <div className="relative glow-box bg-dark-800/50 backdrop-blur-xl p-3 rounded-xl border border-gold-500/25 overflow-hidden">
-                      <motion.div
-                        className="absolute inset-0"
-                        animate={{ opacity: [0.06, 0.14, 0.06] }}
-                        transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
-                        style={{ background: 'radial-gradient(circle at 30% 30%, rgba(255,215,0,0.14), transparent 60%)' }}
-                      />
-                      <div className="relative z-10">
-                        <div className="text-[10px] text-gold-500/70 font-mono tracking-widest">INCOMING</div>
-                        <div className="mt-2 flex items-center gap-2">
-                          <motion.div
-                            className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(0,240,255,0.8)]"
-                            animate={{ opacity: [0.2, 1, 0.2], scale: [0.9, 1.05, 0.9] }}
-                            transition={{ duration: 0.9, repeat: Infinity, ease: 'easeInOut' }}
-                          />
-                          <div className="text-xs font-mono text-gold-500/60">scanning…</div>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                  {blocks.map((block, i) => (
-                    <motion.div
-                      key={block.height}
-                      layout
-                      initial={{ opacity: 0, x: -40, scale: 0.95 }}
-                      animate={{ opacity: 1, x: 0, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.5 }}
-                      transition={{ type: "spring", stiffness: 120, damping: 26, mass: 0.9 }}
-                      className="shrink-0 w-80 snap-center relative z-10"
-                    >
-                      {/* Left Node Connector */}
-                      <div className="absolute top-1/2 -left-4 w-4 h-4 bg-dark-900 border-2 border-cyan-500 rounded-full -translate-y-1/2 z-20 shadow-[0_0_10px_#00F0FF]">
-                        <div className="absolute inset-1 bg-cyan-400 rounded-full animate-pulse" />
-                      </div>
-                      {/* Right Node Connector */}
-                      <div className="absolute top-1/2 -right-4 w-4 h-4 bg-dark-900 border-2 border-cyan-500 rounded-full -translate-y-1/2 z-20 shadow-[0_0_10px_#00F0FF]">
-                         <div className="absolute inset-1 bg-cyan-400 rounded-full animate-pulse" />
-                      </div>
-
-                      <div className="relative glow-box bg-dark-800/90 backdrop-blur-xl p-6 rounded-2xl border-t-4 border-t-cyan-500 overflow-hidden group hover:border-cyan-400 transition-colors">
-                        <div className="absolute -right-10 -top-10 text-cyan-500/5 group-hover:text-cyan-500/10 transition-colors duration-500">
-                          <Box className="w-40 h-40" />
-                        </div>
-                        
-                        <div className="relative z-10">
-                          <div className="flex justify-between items-start mb-4">
-                            <div>
-                              <div className="text-xs text-cyan-500/60 font-mono mb-1">BLOCK HEIGHT</div>
-                              <div className="text-2xl font-bold font-mono text-cyan-400 glow-text-cyan">#{block.height}</div>
-                            </div>
-                            <div className="flex items-center gap-1 text-xs text-cyan-400/80 font-mono bg-cyan-500/10 px-2 py-1 rounded border border-cyan-500/20">
-                              <Clock className="w-3 h-3" /> {block.time}
-                            </div>
-                          </div>
-
-                          <div className="space-y-3">
-                            <div>
-                              <div className="text-[10px] text-gold-500/40 font-mono mb-1">BLOCK HASH</div>
-                              <div className="text-sm font-mono text-gold-500/80 truncate">{block.hash}</div>
-                            </div>
-                            
-                            <div className="flex justify-between items-end">
-                              <div>
-                                <div className="text-[10px] text-gold-500/40 font-mono mb-1">VALIDATOR (SIGNER)</div>
-                                <button
-                                  onClick={() => block.validator && navigateTo(`/address/${block.validator}`)}
-                                  className="text-left text-xs font-mono text-gold-400 hover:text-cyan-300 underline decoration-gold-500/20 hover:decoration-cyan-400/60"
-                                >
-                                  {block.miner}
-                                </button>
-                                <button
-                                  onClick={() => block.validator && navigateTo(`/address/${block.validator}`)}
-                                  className="text-left text-[10px] font-mono text-gold-500/40 hover:text-cyan-300 truncate max-w-[170px] underline decoration-gold-500/10 hover:decoration-cyan-400/60"
-                                >
-                                  {block.validator ?? ""}
-                                </button>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-[10px] text-gold-500/40 font-mono mb-1">REWARD / FEES</div>
-                                <div className="text-sm font-mono font-bold text-cyan-400">{block.reward} tDCAI</div>
-                                <div className="text-[10px] font-mono text-gold-500/40">{block.rewardWei} wei · baseFee {block.baseFeePerGas ?? "--"} wei</div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 pt-4 border-t border-cyan-500/20 flex justify-between items-center">
-                            <div className="text-xs font-mono text-gold-500/60">{block.txCount} Transactions</div>
-                            <div className="text-[10px] font-mono text-gold-500/40">gas {block.gasUsed ?? "--"} / {block.gasLimit ?? "--"}</div>
-                            <button 
-                              onClick={() => handleViewBlock(block)}
-                              className="text-xs font-mono text-cyan-400 hover:text-cyan-300 flex items-center gap-1 group-hover:translate-x-1 transition-transform cursor-pointer"
-                            >
-                              VIEW <ChevronRight className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            </div>
-
-            <div className="relative z-10">
-              <div className="glow-box bg-dark-800/50 backdrop-blur-md rounded-2xl p-6 border-t-2 border-t-gold-500/30">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-bold tracking-widest flex items-center gap-2">
-                    <ArrowRightLeft className="w-5 h-5 text-gold-500" />
-                    LIVE TRANSACTIONS
-                  </h2>
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
-                    </span>
-                    <span className="text-xs font-mono text-cyan-400/80">STREAMING</span>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <AnimatePresence initial={false}>
-                    {txs.map(tx => (
-                      <motion.div
-                        key={tx.hash}
-                        layout
-                        initial={{ opacity: 0, y: -20, backgroundColor: 'rgba(0, 240, 255, 0.1)' }}
-                        animate={{ opacity: 1, y: 0, backgroundColor: 'rgba(0, 240, 255, 0)' }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{ duration: 0.5 }}
-                        className="group flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg border border-gold-500/10 hover:border-cyan-500/40 bg-dark-900/50 transition-colors relative"
-                      >
-                        <div className="flex items-center gap-4 mb-2 sm:mb-0">
-                          <div className="p-2 bg-gold-500/10 rounded-md group-hover:bg-cyan-500/20 transition-colors">
-                            <button onClick={() => setExpandedTx(expandedTx === tx.hash ? null : tx.hash)} className="cursor-pointer">
-                              <Info className="w-4 h-4 text-gold-500 group-hover:text-cyan-400 transition-colors" />
-                            </button>
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className={"text-[10px] font-mono px-2 py-0.5 rounded border " + ((tx.result === "success" || tx.result === "ok") ? "text-emerald-300 border-emerald-500/30 bg-emerald-500/10" : "text-rose-300 border-rose-500/30 bg-rose-500/10")}>
-                                {(tx.result === "success" || tx.result === "ok") ? "SUCCESS" : "FAILED"}
-                              </span>
-                              <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-cyan-500/20 bg-cyan-500/10 text-cyan-300">
-                                {String(tx.method ?? "txn").toUpperCase()}
-                              </span>
-                            </div>
-                            <button
-  onClick={() => handleViewTx(tx.hash)}
-  className="text-left text-[11px] font-mono text-cyan-400 hover:text-cyan-300 break-all w-44 sm:w-72 leading-4 underline decoration-cyan-500/30 hover:decoration-cyan-400/60 transition-colors cursor-pointer"
-  title="View transaction details"
->{tx.hash}</button>
-                            <div className="text-[10px] font-mono text-gold-500/50">{tx.time}{tx.timestamp ? (' · ' + timeAgo(tx.timestamp)) : ""}</div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 flex-1 px-3">
-                          <button onClick={async () => {
-  const ok = await copyToClipboard(tx.from);
-  if (ok) {
-    setCopyToast('Copied FROM: ' + tx.from);
-    setTimeout(() => setCopyToast(null), 1200);
-  }
-}} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate w-24 cursor-pointer">{tx.from}</button>
-                          <div className="h-px flex-1 bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent relative">
-                            <div className="absolute top-1/2 -translate-y-1/2 w-2 h-2 bg-cyan-400 rounded-full blur-[1px] shadow-[0_0_8px_#00F0FF] tx-flow-dot" />
-                          </div>
-                          <button onClick={async () => {
-  const ok = await copyToClipboard(tx.to);
-  if (ok) {
-    setCopyToast('Copied TO: ' + tx.to);
-    setTimeout(() => setCopyToast(null), 1200);
-  }
-}} className="text-xs font-mono text-gold-500/70 hover:text-cyan-300 truncate w-24 cursor-pointer">{tx.to}</button>
-                        </div>
-
-                        <div className="text-right mt-2 sm:mt-0">
-                          <div className="text-sm font-mono font-bold text-gold-500 glow-text">Value {tx.value} tDCAI</div>
-                          <div className="text-[10px] font-mono text-gold-500/40">Fee {tx.fee} tDCAI</div>
-                        </div>
-
-                        {expandedTx === tx.hash && (
-                          <div className="absolute left-0 top-full mt-2 z-50 w-full sm:w-[720px] rounded-lg border border-cyan-500/30 bg-dark-900/95 backdrop-blur-md p-3 text-[11px] font-mono text-gold-500/80 shadow-[0_0_30px_rgba(0,240,255,0.18)] max-h-60 overflow-auto">
-                            <div className="text-cyan-300/80 mb-2">Additional info</div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              <div>Transaction fee: <span className="text-cyan-300">{tx.fee} tDCAI</span> ({tx.feeWei} wei)</div>
-                              <div>Gas limit | used: <span className="text-cyan-300">{tx.gasLimit}</span> | <span className="text-cyan-300">{tx.gasUsed}</span></div>
-                              <div>Base fee (wei): <span className="text-cyan-300">{tx.baseFeePerGas}</span></div>
-                              <div>Txn type: <span className="text-cyan-300">{String(tx.type ?? '--')}</span> · Nonce: <span className="text-cyan-300">{String(tx.nonce ?? '--')}</span> · Position: <span className="text-cyan-300">{String(tx.position ?? '--')}</span></div>
-                            </div>
-                          </div>
-                        )}
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </div>
-              </div>
-            </div>
-          </motion.main>
+          <HomeView key="home" blocks={blocks} txs={txs} onViewBlock={handleViewBlock} onViewTx={handleViewTx} />
         ) : currentView === 'blocks' ? (
-          <BlocksListView
-            key="blocks"
-            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
-          />
+          <BlocksListView key="blocks" onViewBlock={handleViewBlockH} />
         ) : currentView === 'txs' ? (
-          <TxsListView
-            key="txs"
-            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
-            onViewAddress={(a: string) => handleViewAddress(a)}
-            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
-          />
+          <TxsListView key="txs" onViewTx={handleViewTx} onViewAddress={handleViewAddress} onViewBlock={handleViewBlockH} />
         ) : currentView === 'tokens' ? (
-          <TokensView
-            key="tokens"
-            onViewToken={(a: string) => handleViewToken(a)}
-            onViewAddress={(a: string) => handleViewAddress(a)}
-          />
+          <TokensView key="tokens" onViewToken={handleViewToken} onViewAddress={handleViewAddress} />
         ) : currentView === 'contributors' ? (
           <ContributorProgram key="contributors" />
         ) : currentView === 'dashboard' ? (
@@ -4395,46 +2918,77 @@ export default function App() {
             key="token"
             address={selectedTokenAddress || ''}
             onBack={() => { setCurrentView('tokens'); try { window.history.pushState({ view: 'tokens' }, '', '/tokens'); } catch {} }}
-            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
-            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
-            onViewAddress={(a: string) => handleViewAddress(a)}
+            onViewTx={handleViewTx}
+            onViewBlock={handleViewBlockH}
+            onViewAddress={handleViewAddress}
           />
         ) : currentView === 'tx' ? (
           <TxView
             key="tx"
             hash={selectedTxHash || ''}
-            onBack={() => setCurrentView('home')}
-            onViewBlock={(h: number) => { setSelectedBlock({ height: h }); setCurrentView('block'); try { window.history.pushState({ view: 'block', height: h }, '', `/block/${h}`); } catch {} }}
-            onViewAddress={(a: string) => handleViewAddress(a)}
+            onBack={() => window.history.back()}
+            onViewBlock={handleViewBlockH}
+            onViewAddress={handleViewAddress}
           />
         ) : currentView === 'address' ? (
           <AddressView
             key="address"
             address={selectedAddress || ''}
-            onBack={() => setCurrentView('home')}
-            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
-            onViewAddress={(a: string) => handleViewAddress(a)}
-            onViewToken={(a: string) => handleViewToken(a)}
+            onBack={() => window.history.back()}
+            onViewTx={handleViewTx}
+            onViewAddress={handleViewAddress}
+            onViewToken={handleViewToken}
           />
         ) : (
-          <BlockView 
-            key="block" 
-            block={selectedBlock} 
-            onBack={() => setCurrentView('home')} 
-            onViewTx={(h: string) => { setSelectedTxHash(h); setCurrentView('tx'); try { window.history.pushState({ view: 'tx', hash: h }, '', `/tx/${h}`); } catch {} }}
-            onViewAddress={(a: string) => handleViewAddress(a)}
+          <BlockView
+            key="block"
+            block={selectedBlock}
+            onBack={() => window.history.back()}
+            onViewTx={handleViewTx}
+            onViewAddress={handleViewAddress}
+            onViewBlock={handleViewBlockH}
           />
         )}
-      </AnimatePresence>
+      </>
 
-      <footer className="border-t border-cyan-500/20 py-8 mt-20 relative z-10 bg-dark-900/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Cpu className="w-5 h-5 text-cyan-400" />
-            <span className="font-black tracking-widest text-gold-500/50">DCAI<span className="text-cyan-500/50">L3</span></span>
+      <footer className="border-t border-line mt-14 relative z-10 bg-ink-900/60">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-gold flex items-center justify-center">
+                <Cpu className="w-3.5 h-3.5 text-ink-950" />
+              </div>
+              <span className="font-bold text-[14px] text-txt">DCAI <span className="text-gold">L3</span></span>
+              <Badge tone="cyan">testnet</Badge>
+            </div>
+            <div className="mt-2 text-[11px] font-mono text-txt-3 leading-5">
+              AuraScan — the DCAI L3 explorer.<br />
+              chainId {CHAIN_ID} · {NATIVE_SYMBOL} · Clique PoA · Geth v1.13.15
+            </div>
           </div>
-          <div className="text-xs font-mono text-gold-500/40">
-            © 2026 DCAI FOUNDATION. ALL SYSTEMS NOMINAL.
+
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-txt-3 mb-2">Explorer</div>
+            <div className="flex flex-col gap-1.5 text-[12px]">
+              <LinkText tone="muted" onClick={() => navigateTo('/blocks')}><span className="inline-flex items-center gap-1.5"><Box className="w-3 h-3" /> Blocks</span></LinkText>
+              <LinkText tone="muted" onClick={() => navigateTo('/txs')}><span className="inline-flex items-center gap-1.5"><ArrowRightLeft className="w-3 h-3" /> Transactions</span></LinkText>
+              <LinkText tone="muted" onClick={() => navigateTo('/tokens')}><span className="inline-flex items-center gap-1.5"><Database className="w-3 h-3" /> Tokens</span></LinkText>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-txt-3 mb-2">Network</div>
+            <div className="flex flex-col gap-1.5 text-[12px]">
+              <LinkText tone="muted" onClick={() => navigateTo('/dashboard')}><span className="inline-flex items-center gap-1.5"><Code2 className="w-3 h-3" /> RPC API keys</span></LinkText>
+              <LinkText tone="muted" onClick={() => navigateTo('/contributors')}><span className="inline-flex items-center gap-1.5"><ShieldCheck className="w-3 h-3" /> Contributor program</span></LinkText>
+              <a className="font-mono text-txt-2 hover:text-cyan transition-colors" href={`${publicBase}/faucet/`} target="_blank" rel="noreferrer">Faucet ↗</a>
+              <a className="font-mono text-txt-2 hover:text-cyan transition-colors" href={`${publicBase}/rewards/`} target="_blank" rel="noreferrer">Rewards ↗</a>
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-line/60">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 text-[10px] font-mono text-txt-3">
+            © 2026 DCAI Foundation · All systems nominal
           </div>
         </div>
       </footer>

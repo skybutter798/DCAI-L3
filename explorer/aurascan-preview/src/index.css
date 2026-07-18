@@ -1,101 +1,82 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&family=JetBrains+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --color-gold-400: #FFE55C;
-  --color-gold-500: #FFD700;
-  --color-gold-600: #FFB300;
-  --color-dark-700: #1F1A00;
-  --color-dark-800: #0a0800;
-  --color-dark-900: #030200;
-  --font-sans: 'Outfit', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  /* Surfaces */
+  --color-ink-950: #07080a;
+  --color-ink-900: #0c0e11;
+  --color-ink-800: #12151a;
+  --color-ink-750: #171b21;
+  --color-ink-700: #1e232b;
+
+  /* Lines */
+  --color-line: #232833;
+  --color-line-2: #303747;
+
+  /* Text */
+  --color-txt: #e8eaee;
+  --color-txt-2: #a2a9b4;
+  --color-txt-3: #6e7683;
+
+  /* Brand accents */
+  --color-gold: #f0b90b;
+  --color-gold-2: #ffd34d;
+  --color-cyan: #22d3ee;
+  --color-cyan-2: #67e8f9;
+
+  /* Semantic */
+  --color-ok: #34d399;
+  --color-bad: #f87171;
+  --color-warn: #fbbf24;
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+html {
+  background-color: var(--color-ink-950);
 }
 
 body {
-  background-color: var(--color-dark-900);
-  color: var(--color-gold-500);
+  background-color: var(--color-ink-950);
+  color: var(--color-txt);
+  font-family: var(--font-sans);
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Perspective Grid */
-.perspective-grid {
+/* Single, subtle brand wash at the very top of the page. Static — no animation. */
+.brand-wash {
   position: fixed;
-  bottom: -20vh;
-  left: -50vw;
-  width: 200vw;
-  height: 70vh;
-  background-image:
-    linear-gradient(to right, rgba(255, 215, 0, 0.1) 1px, transparent 1px),
-    linear-gradient(to top, rgba(255, 215, 0, 0.1) 1px, transparent 1px);
-  background-size: 60px 60px;
-  transform: perspective(1000px) rotateX(75deg);
-  transform-origin: top;
-  z-index: -1;
+  top: -220px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1100px;
+  height: 440px;
+  background: radial-gradient(closest-side, rgba(240, 185, 11, 0.07), transparent 70%);
   pointer-events: none;
-  animation: grid-move 3s linear infinite;
-  mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%);
+  z-index: 0;
 }
 
-@keyframes grid-move {
-  0% { background-position: 0 0; }
-  100% { background-position: 0 60px; }
+::selection {
+  background: var(--color-gold);
+  color: var(--color-ink-950);
 }
 
-/* Scanline */
-.scanline {
-  width: 100%;
-  height: 100vh;
-  background: linear-gradient(to bottom, transparent, rgba(255, 215, 0, 0.05), transparent);
-  position: fixed;
-  top: -100vh;
-  left: 0;
-  z-index: 50;
-  animation: scan 8s linear infinite;
-  pointer-events: none;
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
-
-@keyframes scan {
-  0% { top: -100vh; }
-  100% { top: 100vh; }
+::-webkit-scrollbar-track {
+  background: var(--color-ink-950);
 }
-
-.glow-text {
-  text-shadow: 0 0 10px rgba(255, 215, 0, 0.5), 0 0 20px rgba(255, 215, 0, 0.3);
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 4px;
 }
-
-.glow-text-cyan {
-  text-shadow: 0 0 10px rgba(34, 211, 238, 0.5), 0 0 20px rgba(34, 211, 238, 0.3);
-}
-
-.glow-box {
-  box-shadow: 0 0 15px rgba(255, 215, 0, 0.1), inset 0 0 10px rgba(255, 215, 0, 0.05);
-  border: 1px solid rgba(255, 215, 0, 0.2);
-  transition: all 0.3s ease;
-}
-
-.glow-box:hover {
-  box-shadow: 0 0 25px rgba(255, 215, 0, 0.3), inset 0 0 20px rgba(255, 215, 0, 0.1);
-  border: 1px solid rgba(255, 215, 0, 0.6);
-}
-
-.glow-box-cyan {
-  box-shadow: 0 0 15px rgba(34, 211, 238, 0.1), inset 0 0 10px rgba(34, 211, 238, 0.05);
-  border: 1px solid rgba(34, 211, 238, 0.2);
-  transition: all 0.3s ease;
-}
-
-.glow-box-cyan:hover {
-  box-shadow: 0 0 25px rgba(34, 211, 238, 0.3), inset 0 0 20px rgba(34, 211, 238, 0.1);
-  border: 1px solid rgba(34, 211, 238, 0.6);
-}
-
-.hex-bg {
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg width='24' height='40' viewBox='0 0 24 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 40c5.523 0 10-4.477 10-10V10C10 4.477 5.523 0 0 0h24c-5.523 0-10 4.477-10 10v20c0 5.523 4.477 10 10 10H0z' fill='%23ffd700' fill-opacity='0.02' fill-rule='evenodd'/%3E%3C/svg%3E");
-  z-index: -2;
-  pointer-events: none;
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-line-2);
 }
 
 .hide-scrollbar::-webkit-scrollbar {
@@ -106,30 +87,25 @@ body {
   scrollbar-width: none;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
+/* Live indicator dot — the one allowed infinite animation */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
-::-webkit-scrollbar-track {
-  background: var(--color-dark-900);
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 215, 0, 0.2);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 215, 0, 0.5);
+.live-dot {
+  animation: live-pulse 1.6s ease-in-out infinite;
 }
 
-
-/* LIVE TRANSACTIONS: keep the from→to moving dot always animating (even after view transitions) */
-@keyframes txFlowDotMove {
-  0% { left: 0%; opacity: 0.6; }
-  15% { opacity: 1; }
-  85% { opacity: 1; }
-  100% { left: 100%; opacity: 0.6; }
+/* New table-row highlight: finite, fades out once */
+@keyframes row-flash {
+  0% { background-color: rgba(240, 185, 11, 0.10); }
+  100% { background-color: transparent; }
 }
-.tx-flow-dot {
-  animation: txFlowDotMove 1.5s linear infinite;
-  transform: translateX(-50%);
-  will-change: left, opacity;
+.row-flash {
+  animation: row-flash 0.9s ease-out 1;
+}
+
+/* Numeric alignment for data columns */
+.tnum {
+  font-variant-numeric: tabular-nums;
 }
