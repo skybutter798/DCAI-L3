@@ -1,14 +1,51 @@
 import http from 'node:http';
 import fs from 'node:fs';
-import { execSync, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { ethers } from 'ethers';
+import {
+  buildContributorConfig,
+  contributorSpecFromRequest,
+  ensureOperatorActive,
+  preflightContributorEndpoint,
+  renderOperatorRoutes,
+  restoreOperatorStatus,
+} from './operator-onboarding.mjs';
+import {
+  connectToFoundationPeers,
+  DEFAULT_PEER_AGENTS,
+  rollbackFoundationPeers,
+} from './peer-client.mjs';
+
+function readEnvFileValue(path, key) {
+  try {
+    const line = fs.readFileSync(path, 'utf8').split(/\r?\n/).find((row) => {
+      const clean = row.trim().replace(/^export\s+/, '');
+      return clean.startsWith(key + '=');
+    });
+    if (!line) return '';
+    const clean = line.trim().replace(/^export\s+/, '');
+    return clean.slice(key.length + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
+  } catch {
+    return '';
+  }
+}
 
 // --- Existing monitor/admin config ---
 const CONFIG_PATH = '/opt/dcai/rewards/monitor/config.json';
 const RPC_URL = process.env.RPC_URL || 'http://139.180.188.61:8545';
 const DISTRIBUTOR_ADDR = '0x728f2C63b9A0ff0918F5ffB3D4C2d004107476B7';
 const PRIVATE_KEY = process.env.FOUNDATION_KEY;
+const CONTRACT_OWNER_KEY = process.env.CONTRACT_OWNER_KEY || readEnvFileValue('/opt/dcai/rewards/.env', 'PRIVATE_KEY');
+const OPERATOR_REGISTRY_ADDR = process.env.OPERATOR_REGISTRY_ADDRESS || '0xb37c81eBC4b1B4bdD5476fe182D6C72133F41db9';
+const OPERATOR_ROUTES_PATH = process.env.OPERATOR_ROUTES_PATH || '/etc/nginx/dcai-operator-routes.conf';
+const OPERATOR_ROUTE_BASE = process.env.OPERATOR_ROUTE_BASE || 'http://139.180.140.143';
+const EXPECTED_CHAIN_ID = Number(process.env.CHAIN_ID || 18441);
+const ADMIN_API_PORT = Number(process.env.ADMIN_API_PORT || 3001);
+const P2P_AGENT_TOKEN = process.env.P2P_AGENT_TOKEN || readEnvFileValue('/opt/dcai/rewards/.env', 'P2P_AGENT_TOKEN');
+const P2P_AGENT_URLS = String(process.env.P2P_AGENT_URLS || DEFAULT_PEER_AGENTS.join(','))
+  .split(',').map((value) => value.trim()).filter(Boolean);
+const TRAFFIC_STATS_PATH = process.env.TRAFFIC_STATS_PATH || '/opt/dcai/rewards/monitor/traffic-stats.json';
 
 // --- API key system config ---
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
@@ -37,6 +74,7 @@ const distAbi = [
 
 // in-memory nonces for signature auth
 const nonces = new Map(); // addressLower -> nonce
+let approvalInProgress = false;
 
 function sendJson(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json' });
@@ -70,10 +108,30 @@ function loadJson(p, fallback) {
   }
 }
 
+function atomicWriteFile(path, data, mode = 0o600) {
+  const tmp = path + '.tmp-' + process.pid + '-' + randomBytes(4).toString('hex');
+  try {
+    fs.writeFileSync(tmp, data, { mode });
+    fs.chmodSync(tmp, mode);
+    fs.renameSync(tmp, path);
+  } finally {
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+  }
+}
+
+function snapshotFile(path) {
+  if (!fs.existsSync(path)) return { path, exists:false, data:null, mode:null };
+  return { path, exists:true, data:fs.readFileSync(path), mode:fs.statSync(path).mode & 0o777 };
+}
+
+function restoreFile(snapshot) {
+  if (snapshot.exists) atomicWriteFile(snapshot.path, snapshot.data, snapshot.mode || 0o600);
+  else fs.rmSync(snapshot.path, { force:true });
+}
+
 function saveJson(p, obj) {
-  const tmp = p + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  fs.renameSync(tmp, p);
+  const mode = fs.existsSync(p) ? (fs.statSync(p).mode & 0o777) : 0o600;
+  atomicWriteFile(p, JSON.stringify(obj, null, 2), mode);
 }
 
 function usageForKey(key) {
@@ -363,8 +421,139 @@ function writeNginxKeyFile(tierKey, keys) {
 }
 
 function reloadNginx() {
-  execSync('nginx -t');
-  execSync('nginx -s reload');
+  execFileSync('nginx', ['-t'], { stdio:'pipe' });
+  execFileSync('nginx', ['-s', 'reload'], { stdio:'pipe' });
+}
+
+async function rollbackContributorState(state) {
+  if (!state || state.rolledBack) return [];
+  state.rolledBack = true;
+  const errors = [];
+  try {
+    restoreFile(state.configSnapshot);
+    restoreFile(state.routesSnapshot);
+    reloadNginx();
+  } catch (error) {
+    errors.push('filesystem/nginx rollback failed: ' + (error?.message || error));
+  }
+  try {
+    await restoreOperatorStatus(state.activation, state.operator);
+  } catch (error) {
+    errors.push('registry rollback failed: ' + (error?.message || error));
+  }
+  try {
+    errors.push(...await rollbackFoundationPeers(state.p2pVerification, P2P_AGENT_TOKEN));
+  } catch (error) {
+    errors.push('P2P rollback failed: ' + (error?.message || error));
+  }
+  return errors;
+}
+
+async function beginContributorOnboarding(request) {
+  const spec = contributorSpecFromRequest(request);
+  if (!spec) return null;
+  if (!CONTRACT_OWNER_KEY) throw new Error('Contract owner key is not configured for contributor onboarding');
+
+  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const referenceBlockNumber = await provider.getBlockNumber();
+  const directPreflight = await preflightContributorEndpoint(spec, {
+    expectedChainId: EXPECTED_CHAIN_ID,
+    referenceBlockNumber,
+    timeoutMs: 8000,
+  });
+
+  const configSnapshot = snapshotFile(CONFIG_PATH);
+  const routesSnapshot = snapshotFile(OPERATOR_ROUTES_PATH);
+  const currentConfig = JSON.parse(configSnapshot.data.toString('utf8'));
+  const state = {
+    configSnapshot,
+    routesSnapshot,
+    activation:null,
+    p2pVerification:null,
+    operator:spec.operator,
+    rolledBack:false,
+  };
+
+  try {
+    state.p2pVerification = await connectToFoundationPeers({
+      enode:spec.enode,
+      endpointAddresses:directPreflight.addresses,
+      agentUrls:P2P_AGENT_URLS,
+      token:P2P_AGENT_TOKEN,
+    });
+    const plan = buildContributorConfig(currentConfig, request, directPreflight, {
+      routeBase: OPERATOR_ROUTE_BASE,
+      p2pVerification:state.p2pVerification,
+    });
+    const routesText = renderOperatorRoutes(plan.config);
+
+    // Establish and verify the private monitoring route before the operator can
+    // enter scoring. The raw contributor endpoint is never published in the
+    // public epoch summary.
+    atomicWriteFile(OPERATOR_ROUTES_PATH, routesText, 0o600);
+    reloadNginx();
+    await preflightContributorEndpoint({ ...spec, endpoint:plan.routeUrl }, {
+      expectedChainId: EXPECTED_CHAIN_ID,
+      referenceBlockNumber,
+      timeoutMs: 8000,
+    });
+
+    state.activation = await ensureOperatorActive({
+      rpcUrl: RPC_URL,
+      privateKey: CONTRACT_OWNER_KEY,
+      registryAddress: OPERATOR_REGISTRY_ADDR,
+      operator: spec.operator,
+    });
+
+    atomicWriteFile(CONFIG_PATH, JSON.stringify(plan.config, null, 2) + '\n', 0o600);
+    return {
+      state,
+      publicResult: {
+        operator: spec.operator,
+        service: spec.service,
+        programTier: spec.programTier,
+        rewardFactor: spec.policy.rewardFactor,
+        p2pNodeId:spec.nodeId,
+        p2pConnectedAgents:state.p2pVerification.connectedAgents,
+        registryStatus: 'ACTIVE',
+        registryTxHash: state.activation.txHash,
+        registryChanged: state.activation.changed,
+        monitoringRouteCreated: true,
+        rewardConfigUpdated: true,
+      },
+      rollback: async () => await rollbackContributorState(state),
+    };
+  } catch (error) {
+    const rollbackErrors = await rollbackContributorState(state);
+    const suffix = rollbackErrors.length ? ' | ' + rollbackErrors.join(' | ') : '';
+    throw new Error((error?.message || String(error)) + suffix);
+  }
+}
+
+function commitApprovedKey({ requests, request, keys, keyObj, onboarding }) {
+  const snapshots = [
+    snapshotFile(KEYS_PATH),
+    snapshotFile(REQ_PATH),
+    ...Object.values(TIERS).map((tier) => snapshotFile(tier.keyFile)),
+  ];
+  try {
+    keys.push(keyObj);
+    request.status = 'approved';
+    request.approvedAt = new Date().toISOString();
+    if (onboarding) request.onboarding = onboarding.publicResult;
+    saveJson(KEYS_PATH, keys);
+    saveJson(REQ_PATH, requests);
+    writeNginxKeyFile('basic', keys);
+    writeNginxKeyFile('pro', keys);
+    writeNginxKeyFile('ultra', keys);
+    reloadNginx();
+  } catch (error) {
+    for (const snapshot of snapshots) {
+      try { restoreFile(snapshot); } catch {}
+    }
+    try { reloadNginx(); } catch {}
+    throw error;
+  }
 }
 
 function changeAdminPassword(username, currentPassword, newPassword) {
@@ -389,6 +578,34 @@ function getTodayDayIdUTC() {
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(d.getUTCDate()).padStart(2, '0');
   return Number(String(yyyy) + mm + dd);
+}
+
+function contributionTrafficSummary(windowMinutes = 120) {
+  const data = loadJson(TRAFFIC_STATS_PATH, { minutes:{} });
+  const cutoff = new Date(Date.now() - windowMinutes * 60_000).toISOString().slice(0, 16) + 'Z';
+  const operators = {};
+  for (const [minute, bucket] of Object.entries(data.minutes || {})) {
+    if (minute < cutoff) continue;
+    for (const [operator, row] of Object.entries(bucket?.operators || {})) {
+      const total = operators[operator] ||= { requests:0, successes:0, failures:0, fallbacks:0, totalLatencyMs:0, bytesIn:0, bytesOut:0 };
+      for (const key of Object.keys(total)) total[key] += Number(row?.[key] || 0);
+    }
+  }
+  for (const row of Object.values(operators)) {
+    row.successRate = row.requests ? row.successes / row.requests : 0;
+    row.avgLatencyMs = row.requests ? row.totalLatencyMs / row.requests : null;
+  }
+  return { windowMinutes, updatedAt:data.updatedAt || null, operators };
+}
+
+async function contributorRouterStatus() {
+  try {
+    const response = await fetch('http://127.0.0.1:3998/v1/status', { signal:AbortSignal.timeout(3000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    return { ok:false, error:error?.message || String(error), candidates:[] };
+  }
 }
 
 ensureStore();
@@ -443,6 +660,11 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'stake not valid for tier', stake });
       }
 
+      const source = sourceFromNote(note);
+      const contributorSpec = source === 'contributor'
+        ? contributorSpecFromRequest({ address:addr, tier, note, source })
+        : null;
+
       const requests = loadJson(REQ_PATH, []);
       const existing = requests.find((r) => r.address === addr.toLowerCase() && r.status === 'pending');
       if (existing) return sendJson(res, 200, { ok: true, request: existing, note: 'already pending' });
@@ -452,7 +674,8 @@ const server = http.createServer(async (req, res) => {
         address: addr.toLowerCase(),
         tier,
         note,
-        source: sourceFromNote(note),
+        source,
+        programTier: contributorSpec?.programTier || null,
         createdAt: new Date().toISOString(),
         status: 'pending',
         stakeWei: stake.stakeWei,
@@ -521,6 +744,9 @@ const server = http.createServer(async (req, res) => {
   // ---------- Admin: approve request ----------
   if ((pathname === '/api/apikey/approve' || pathname === '/apikey/approve') && req.method === 'POST') {
     if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
+    if (approvalInProgress) return sendJson(res, 409, { error: 'another approval is currently in progress' });
+    approvalInProgress = true;
+    let onboarding = null;
     try {
       const body = JSON.parse(await readBody(req));
       const requestId = String(body?.id || '');
@@ -534,6 +760,8 @@ const server = http.createServer(async (req, res) => {
       const stake = await verifyStake(provider, ethers.getAddress(r.address), r.tier);
       if (!stake.ok) return sendJson(res, 400, { error: 'stake not valid', stake, request: r });
 
+      onboarding = await beginContributorOnboarding(r);
+
       const keys = loadJson(KEYS_PATH, []);
       const newKey = genKey32();
       const keyObj = {
@@ -542,26 +770,27 @@ const server = http.createServer(async (req, res) => {
         tier: r.tier,
         key: newKey,
         source: r.source || sourceFromNote(r.note),
+        programTier: onboarding?.publicResult?.programTier || r.programTier || null,
         active: true,
         createdAt: new Date().toISOString(),
       };
-      keys.push(keyObj);
+      commitApprovedKey({ requests, request:r, keys, keyObj, onboarding });
 
-      r.status = 'approved';
-      r.approvedAt = new Date().toISOString();
-
-      saveJson(KEYS_PATH, keys);
-      saveJson(REQ_PATH, requests);
-
-      // regenerate nginx key files from keys.json (source of truth)
-      writeNginxKeyFile('basic', keys);
-      writeNginxKeyFile('pro', keys);
-      writeNginxKeyFile('ultra', keys);
-      reloadNginx();
-
-      return sendJson(res, 200, { ok: true, key: newKey, tier: r.tier, address: r.address });
+      return sendJson(res, 200, {
+        ok: true,
+        key: newKey,
+        tier: r.tier,
+        address: r.address,
+        onboarding: onboarding?.publicResult || null,
+      });
     } catch (e) {
-      return sendJson(res, 500, { error: e.message || String(e) });
+      const rollbackErrors = onboarding ? await onboarding.rollback() : [];
+      return sendJson(res, 500, {
+        error: e.message || String(e),
+        rollbackErrors,
+      });
+    } finally {
+      approvalInProgress = false;
     }
   }
 
@@ -683,6 +912,24 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ---------- Admin: real contributor traffic / P2P status ----------
+  if ((pathname === '/api/contribution-status' || pathname === '/contribution-status') && req.method === 'GET') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error:'admin only' });
+    const config = loadJson(CONFIG_PATH, { operators:[] });
+    return sendJson(res, 200, {
+      ok:true,
+      canaryPercent:4.76,
+      router:await contributorRouterStatus(),
+      traffic:contributionTrafficSummary(120),
+      operators:(config.operators || []).map((operator) => ({
+        operator:operator.operator,
+        programTier:operator.programTier || 'observer',
+        contributionPolicyVersion:operator.contributionPolicyVersion || 'v1',
+        p2p:operator.p2p || null,
+      })),
+    });
+  }
+
 
   // ---------- Existing monitor endpoints ----------
 
@@ -714,7 +961,7 @@ const server = http.createServer(async (req, res) => {
         storage: num(w.storage, 30),
         multiregion: num(w.multiregion, 10),
       };
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+      atomicWriteFile(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 0o600);
       return sendJson(res, 200, { success: true, weights: config.weights, previous });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
@@ -793,10 +1040,10 @@ const server = http.createServer(async (req, res) => {
     if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
     const body = await readBody(req);
     try {
-      if (!PRIVATE_KEY) throw new Error('FOUNDATION_KEY not set');
+      if (!CONTRACT_OWNER_KEY) throw new Error('Contract owner key not set');
       const { cap } = JSON.parse(body || '{}'); // cap in tDCAI
       const provider = new ethers.JsonRpcProvider(RPC_URL);
-      const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+      const wallet = new ethers.Wallet(CONTRACT_OWNER_KEY, provider);
       const dist = new ethers.Contract(DISTRIBUTOR_ADDR, distAbi, wallet);
       const newCapWei = ethers.parseEther(cap.toString());
       const tx = await dist.setDailyCap(newCapWei);
@@ -809,6 +1056,6 @@ const server = http.createServer(async (req, res) => {
   return sendJson(res, 404, { error: 'Not Found', url: pathname });
 });
 
-server.listen(3001, '127.0.0.1', () => {
-  console.log('Admin API running on http://127.0.0.1:3001');
+server.listen(ADMIN_API_PORT, '127.0.0.1', () => {
+  console.log(`Admin API running on http://127.0.0.1:${ADMIN_API_PORT}`);
 });

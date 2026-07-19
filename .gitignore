@@ -2,5 +2,8 @@
 **/.env
 node_modules/
 **/node_modules/
+__pycache__/
+**/__pycache__/
+*.py[cod]
 *.log
 erl_crash.dump

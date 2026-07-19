@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { performance } from 'node:perf_hooks';
+import { DEFAULT_PEER_AGENTS, getFoundationPeerPresence } from './peer-client.mjs';
 
 function arg(name, def = undefined) {
   const idx = process.argv.indexOf(name);
@@ -11,6 +12,10 @@ const cfgPath = arg('--config', 'config.json');
 const outPath = arg('--out', 'measurements.json');
 
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+const trafficStatsPath = cfg.trafficStatsPath || '/opt/dcai/rewards/monitor/traffic-stats.json';
+const peerAgentUrls = String(process.env.P2P_AGENT_URLS || DEFAULT_PEER_AGENTS.join(','))
+  .split(',').map((value) => value.trim()).filter(Boolean);
+const peerAgentToken = process.env.P2P_AGENT_TOKEN || '';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
@@ -41,6 +46,50 @@ function p95(values) {
   const a = [...values].sort((x, y) => x - y);
   const idx = Math.floor(0.95 * (a.length - 1));
   return a[idx];
+}
+
+function trafficMetricsForOperator(operator, windowMinutes = 120) {
+  let data;
+  try { data = JSON.parse(fs.readFileSync(trafficStatsPath, 'utf8')); }
+  catch { return { requests:0, successes:0, failures:0, fallbacks:0, success_rate:0, avg_ms:null, p95_ms:null, bytes_in:0, bytes_out:0, methods:{} }; }
+  const cutoff = new Date(Date.now() - windowMinutes * 60_000).toISOString().slice(0, 16) + 'Z';
+  const total = { requests:0, successes:0, failures:0, fallbacks:0, totalLatencyMs:0, bytes_in:0, bytes_out:0, methods:{}, buckets:{} };
+  for (const [minute, bucket] of Object.entries(data.minutes || {})) {
+    if (minute < cutoff) continue;
+    const row = bucket?.operators?.[String(operator).toLowerCase()];
+    if (!row) continue;
+    total.requests += Number(row.requests || 0);
+    total.successes += Number(row.successes || 0);
+    total.failures += Number(row.failures || 0);
+    total.fallbacks += Number(row.fallbacks || 0);
+    total.totalLatencyMs += Number(row.totalLatencyMs || 0);
+    total.bytes_in += Number(row.bytesIn || 0);
+    total.bytes_out += Number(row.bytesOut || 0);
+    for (const [method, count] of Object.entries(row.methods || {})) total.methods[method] = (total.methods[method] || 0) + Number(count || 0);
+    for (const [limit, count] of Object.entries(row.latencyBuckets || {})) total.buckets[limit] = (total.buckets[limit] || 0) + Number(count || 0);
+  }
+  let p95ms = null;
+  if (total.requests > 0) {
+    const target = Math.ceil(total.requests * 0.95);
+    let seen = 0;
+    for (const [limit, count] of Object.entries(total.buckets).sort((a, b) => Number(a[0]) - Number(b[0]))) {
+      seen += count;
+      if (seen >= target) { p95ms = Number(limit); break; }
+    }
+  }
+  return {
+    requests:total.requests,
+    successes:total.successes,
+    failures:total.failures,
+    fallbacks:total.fallbacks,
+    success_rate:total.requests ? total.successes / total.requests : 0,
+    avg_ms:total.requests ? total.totalLatencyMs / total.requests : null,
+    p95_ms:p95ms,
+    bytes_in:total.bytes_in,
+    bytes_out:total.bytes_out,
+    methods:total.methods,
+    window_minutes:windowMinutes,
+  };
 }
 
 async function probeRpc(url, timeoutMs, methods, samples) {
@@ -167,7 +216,19 @@ async function main() {
     if (op.services?.multiregion) {
       metrics.multiregion = await probeMultiregion(endpoints.multiregion || [], timeoutMs);
     }
-    outOps.push({ operator: op.operator, services: op.services, metrics });
+    if (op.contributionPolicyVersion === 'v2') {
+      metrics.traffic = trafficMetricsForOperator(op.operator);
+      metrics.p2p = op.p2p?.nodeId && peerAgentToken
+        ? await getFoundationPeerPresence({ nodeId:op.p2p.nodeId, agentUrls:peerAgentUrls, token:peerAgentToken })
+        : { connectedAgents:0, agents:[], observedAt:new Date().toISOString(), error:'missing verified node identity or agent token' };
+    }
+    outOps.push({
+      operator: op.operator,
+      programTier: op.programTier || op.operatorTier || 'observer',
+      contributionPolicyVersion:op.contributionPolicyVersion || 'v1',
+      services: op.services,
+      metrics,
+    });
   }
   const out = { epochId, dayId, operators: outOps };
   fs.writeFileSync(outPath, JSON.stringify(out, null, 2));

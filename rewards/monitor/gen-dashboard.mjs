@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import { ethers } from 'ethers';
+import { CONTRIBUTOR_TIERS, policyForOperator } from './contributor-policy.mjs';
 
 const RPC_URL = process.env.RPC_URL || 'http://139.180.188.61:8545';
+const DASHBOARD_OUTPUT = process.env.DASHBOARD_OUTPUT || '/var/www/html/admin/index.html';
 const TREASURY_ADDR = '0xae201c3daacd53e4cb305fa91678b16cc7eae43a';
 const DISTRIBUTOR_ADDR = '0x728f2C63b9A0ff0918F5ffB3D4C2d004107476B7';
 
@@ -93,7 +95,12 @@ async function main() {
     const meas = (measurements.operators || []).find((m) => String(m.operator).toLowerCase() === String(op.operator).toLowerCase());
     const svc = op.services || {};
     const enabled = Object.entries(svc).filter(([, v]) => v).map(([k]) => k);
-    return { operator: op.operator, services: svc, enabled, endpoints: op.endpoints || {}, hasMeasurement: !!meas };
+    const policy = policyForOperator(op);
+    return {
+      operator: op.operator, services: svc, enabled, endpoints: op.endpoints || {}, hasMeasurement: !!meas,
+      programTier:policy.key, rewardFactor:policy.rewardFactor,
+      contributionPolicyVersion:op.contributionPolicyVersion || 'v1', p2p:op.p2p || null,
+    };
   });
 
   const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -130,6 +137,10 @@ async function main() {
     ::-webkit-scrollbar{ width:8px; height:8px; } ::-webkit-scrollbar-track{ background:#07080a; } ::-webkit-scrollbar-thumb{ background:#232833; border-radius:4px; }
     .card{ background:#12151a; border:1px solid #232833; border-radius:14px; }
     .subtle{ color:#6e7683; }
+    .admin-tab[aria-selected="true"]{ color:#07080a; background:#f0b90b; border-color:#f0b90b; }
+    .admin-tab[aria-selected="false"]{ color:#a2a9b4; background:#0c0e11; border-color:#232833; }
+    .admin-tab[aria-selected="false"]:hover{ color:#fff; border-color:#303747; }
+    [data-tab-panel][hidden]{ display:none; }
   </style>
 </head>
 <body class="text-[#e8eaee]">
@@ -149,7 +160,21 @@ async function main() {
         <button onclick="location.reload()" class="text-[11px] mono px-3 py-1.5 rounded-lg border border-[#232833] text-[#a2a9b4] hover:text-white hover:border-[#303747]">Refresh</button>
       </div>
     </header>
-    <div class="keyline mb-6"></div>
+    <div class="keyline mb-4"></div>
+
+    <!-- Focused admin navigation -->
+    <nav id="adminTabs" class="sticky top-0 z-40 mb-6 -mx-2 px-2 py-2 bg-ink-950/95 backdrop-blur border-y border-[#171b21] overflow-x-auto" role="tablist" aria-label="Admin sections">
+      <div class="flex min-w-max gap-2">
+        <button id="tabButton-overview" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-overview" aria-selected="true" data-admin-tab="overview">Overview</button>
+        <button id="tabButton-operators" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-operators" aria-selected="false" data-admin-tab="operators">Operators</button>
+        <button id="tabButton-api-access" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-api-access" aria-selected="false" data-admin-tab="api-access">API Access</button>
+        <button id="tabButton-infrastructure" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-infrastructure" aria-selected="false" data-admin-tab="infrastructure">Infrastructure</button>
+        <button id="tabButton-security" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-security" aria-selected="false" data-admin-tab="security">Security</button>
+      </div>
+    </nav>
+
+    <main>
+    <div id="tabPanel-overview" role="tabpanel" aria-labelledby="tabButton-overview" data-tab-panel="overview">
 
     <!-- Intro / legend -->
     <div class="card p-4 mb-6">
@@ -234,34 +259,52 @@ async function main() {
       <div class="mt-3 text-[10px] mono subtle">Raw total <span id="weightTotal">${wSum}</span> · percentages are the live split. No need to sum to 100 — ratios are what count.</div>
     </section>
 
+    </div>
+    <div id="tabPanel-operators" role="tabpanel" aria-labelledby="tabButton-operators" data-tab-panel="operators" hidden>
+
     <!-- Operators / Contributors -->
     <section class="card p-5 mb-6">
       <h2 class="text-sm font-bold">Operators &amp; External Contributors</h2>
       <p class="text-[11px] text-[#a2a9b4] mt-1 max-w-3xl">Nodes enrolled in the reward program. "External" means machines outside the 7-server core fleet, probed through dedicated nginx routes. Each must also be <b>ACTIVE in OperatorRegistry</b> on-chain before <code class="text-aqua">claim()</code> works.
       <span class="block subtle mt-1">参与奖励计划的节点。「外部」= 核心 7 台之外、别人运营、通过专用路由探测的机器。运营者还必须在链上 OperatorRegistry 里被激活，claim() 才有效。</span></p>
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        ${Object.entries(CONTRIBUTOR_TIERS).map(([key, tier]) => `
+        <div class="rounded-lg bg-ink-900 border border-[#232833] p-3">
+          <div class="flex items-center justify-between"><span class="text-[11px] font-bold uppercase tracking-widest">${esc(tier.label)}</span><span class="mono text-gold text-[10px]">${esc(tier.stakeEther)} tDCAI</span></div>
+          <div class="mt-1 text-[10px] subtle">${esc(tier.function)}</div>
+          <div class="mt-2 mono text-[10px] text-aqua">${tier.rpcRatePerSecond} req/s · reward ${tier.rewardFactor.toFixed(2)}x</div>
+          <div class="mt-1 mono text-[9px] subtle">uptime ${(tier.slo.uptimeFloor * 100).toFixed(tier.slo.uptimeFloor >= .999 ? 1 : 0)}% · RPC p95 ≤ ${tier.slo.rpcP95Ms}ms · lag ≤ ${tier.slo.indexerLagBlocks}</div>
+        </div>`).join('')}
+      </div>
+      <div id="contributionStatus" class="mt-4 rounded-lg bg-ink-900 border border-[#232833] p-3 text-[10px] mono subtle">Loading real traffic and P2P status...</div>
       <div class="mt-4 overflow-x-auto">
         <table class="w-full text-left text-[11px]">
           <thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]">
-            <tr><th class="py-2 pr-4">Operator</th><th class="py-2 pr-4">Services</th><th class="py-2 pr-4">RPC endpoint</th><th class="py-2">Measured</th></tr>
+            <tr><th class="py-2 pr-4">Operator</th><th class="py-2 pr-4">Lane</th><th class="py-2 pr-4">Policy / P2P</th><th class="py-2 pr-4">Services</th><th class="py-2 pr-4">RPC endpoint</th><th class="py-2">Measured</th></tr>
           </thead>
           <tbody class="divide-y divide-[#1e232b]">
             ${opRows.length ? opRows.map((o) => `
             <tr>
               <td class="py-2 pr-4 mono text-gold cursor-pointer" onclick="copyText('${esc(o.operator)}')">${esc(shortAddr(o.operator))}</td>
+              <td class="py-2 pr-4"><span class="uppercase font-bold">${esc(o.programTier)}</span><span class="block mono text-[9px] subtle">${Number(o.rewardFactor).toFixed(2)}x</span></td>
+              <td class="py-2 pr-4"><span class="mono text-[9px] ${o.contributionPolicyVersion === 'v2' ? 'text-emerald-400' : 'subtle'}">${esc(o.contributionPolicyVersion)}</span><span class="block mono text-[9px] subtle">${o.p2p ? ('node '+esc(String(o.p2p.nodeId || '').slice(0,10))+'...') : 'unverified legacy'}</span></td>
               <td class="py-2 pr-4">${o.enabled.length ? o.enabled.map((s) => `<span class="inline-block mono text-[9px] px-1.5 py-0.5 rounded border border-[#303747] text-[#a2a9b4] mr-1">${esc(s)}</span>`).join('') : '<span class="subtle">none</span>'}</td>
               <td class="py-2 pr-4 mono subtle truncate max-w-[280px]" title="${esc(o.endpoints.rpc || '')}">${esc(o.endpoints.rpc || '--')}</td>
               <td class="py-2">${o.hasMeasurement ? '<span class="text-emerald-400">yes</span>' : '<span class="subtle">pending</span>'}</td>
-            </tr>`).join('') : '<tr><td colspan="4" class="py-3 subtle">No operators configured.</td></tr>'}
+            </tr>`).join('') : '<tr><td colspan="6" class="py-3 subtle">No operators configured.</td></tr>'}
           </tbody>
         </table>
       </div>
     </section>
 
+    </div>
+    <div id="tabPanel-api-access" role="tabpanel" aria-labelledby="tabButton-api-access" data-tab-panel="api-access" hidden>
+
     <!-- API Keys -->
     <section class="card p-5 mb-6">
       <h2 class="text-sm font-bold">API Key Approvals</h2>
-      <p class="text-[11px] text-[#a2a9b4] mt-1 max-w-3xl">One staking system, two front-ends: the developer <b>API Dashboard</b> and the <b>Contributor Program</b> (same basic/pro/ultra tiers, just relabelled). Each pending request is tagged by source. Approving generates a 32-hex key and reloads nginx so it works immediately.
-      <span class="block subtle mt-1">同一套质押体系，两个入口：开发者 <b>API Dashboard</b> 与 <b>Contributor Program</b>（tier 相同，只是换名）。每条申请已标注来源。批准会生成 key 并重载 nginx 立即生效。</span></p>
+      <p class="text-[11px] text-[#a2a9b4] mt-1 max-w-3xl">One staking contract, two front-ends. Contributor lanes map Observer/Core/Backbone to Basic/Pro/Ultra, then add enforced service SLOs and reward capacity factors. Approval now also proves a live Enode connection to Foundation peers before the endpoint can enter real canary traffic.
+      <span class="block subtle mt-1">同一质押合约、两个入口。Contributor 的 Observer/Core/Backbone 对应 Basic/Pro/Ultra，并额外强制服务质量与奖励容量系数；批准时会校验等级、质押、区域和端点。</span></p>
       <div id="apiKeyReqStatus" class="mt-3 text-[10px] mono subtle"></div>
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <input id="requestSearchInput" placeholder="Search wallet / endpoint / note" class="bg-ink-900 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono w-[300px]">
@@ -303,6 +346,9 @@ async function main() {
       <div id="stakeWatchTable" class="mt-3"></div>
     </section>
 
+    </div>
+    <div id="tabPanel-infrastructure" role="tabpanel" aria-labelledby="tabButton-infrastructure" data-tab-panel="infrastructure" hidden>
+
     <!-- Health + infra -->
     <section class="card p-5 mb-6">
       <div class="flex items-center justify-between">
@@ -324,6 +370,9 @@ async function main() {
       </div>
     </section>
 
+    </div>
+    <div id="tabPanel-security" role="tabpanel" aria-labelledby="tabButton-security" data-tab-panel="security" hidden>
+
     <!-- Admin login -->
     <section class="card p-5 mb-6">
       <h2 class="text-sm font-bold">Admin Login Password</h2>
@@ -337,6 +386,8 @@ async function main() {
       </div>
       <div id="adminBasicStatus" class="mt-3 text-[10px] mono subtle"></div>
     </section>
+    </div>
+    </main>
 
     <footer class="text-center py-6 text-[10px] mono subtle uppercase tracking-[0.3em]">DCAI Foundation Control · Admin v2</footer>
   </div>
@@ -362,6 +413,37 @@ async function main() {
 
   <script>
     const API_URL = '/admin/api';
+    const ADMIN_TABS = ['overview', 'operators', 'api-access', 'infrastructure', 'security'];
+
+    function setActiveAdminTab(tab, updateHash){
+      const active = ADMIN_TABS.includes(tab) ? tab : 'overview';
+      document.querySelectorAll('[data-admin-tab]').forEach(function(btn){
+        const selected = btn.dataset.adminTab === active;
+        btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+        btn.tabIndex = selected ? 0 : -1;
+      });
+      document.querySelectorAll('[data-tab-panel]').forEach(function(panel){ panel.hidden = panel.dataset.tabPanel !== active; });
+      try { localStorage.setItem('dcai-admin-tab', active); } catch(e) {}
+      if(updateHash && location.hash !== '#' + active) history.replaceState(null, '', '#' + active);
+    }
+
+    function initAdminTabs(){
+      const fromHash = location.hash.replace(/^#/, '');
+      let initial = ADMIN_TABS.includes(fromHash) ? fromHash : 'overview';
+      if(!ADMIN_TABS.includes(fromHash)) { try { const saved=localStorage.getItem('dcai-admin-tab'); if(ADMIN_TABS.includes(saved)) initial=saved; } catch(e) {} }
+      setActiveAdminTab(initial, false);
+      document.querySelectorAll('[data-admin-tab]').forEach(function(btn){
+        btn.addEventListener('click', function(){ setActiveAdminTab(btn.dataset.adminTab, true); window.scrollTo({top:0, behavior:'smooth'}); });
+      });
+      const nav=document.getElementById('adminTabs');
+      if(nav) nav.addEventListener('keydown', function(e){
+        if(e.key!=='ArrowLeft' && e.key!=='ArrowRight') return;
+        const current=ADMIN_TABS.indexOf(document.activeElement?.dataset?.adminTab); if(current<0) return;
+        e.preventDefault(); const step=e.key==='ArrowRight'?1:-1; const next=(current+step+ADMIN_TABS.length)%ADMIN_TABS.length;
+        setActiveAdminTab(ADMIN_TABS[next], true); document.getElementById('tabButton-'+ADMIN_TABS[next])?.focus();
+      });
+      window.addEventListener('hashchange', function(){ const tab=location.hash.replace(/^#/,''); if(ADMIN_TABS.includes(tab)) setActiveAdminTab(tab, false); });
+    }
 
     async function setCap() {
       const cap = prompt('Set new DAILY CAP (tDCAI). Example: 300');
@@ -478,50 +560,81 @@ async function main() {
 
     // ---- api keys ----
     async function adminFetch(path, opts){ return await fetch(API_URL + path, opts || {}); }
-    let apiKeyRequestsCache = [], apiKeyKeysCache = [];
+    let apiKeyRequestsCache = [], apiKeyKeysCache = [], legacyKeysCache = [], stakeWatchCache = [];
+    const TABLE_PAGE_SIZE = 10;
+    const tablePages = { requests:1, history:1, keys:1, legacy:1, stakes:1 };
+
+    function paginateRows(rows, key){
+      const items=Array.isArray(rows)?rows:[]; const total=items.length; const totalPages=Math.max(1,Math.ceil(total/TABLE_PAGE_SIZE));
+      const requested=Math.max(1,parseInt(tablePages[key],10)||1); const page=Math.min(requested,totalPages); tablePages[key]=page;
+      const start=(page-1)*TABLE_PAGE_SIZE;
+      return { rows:items.slice(start,start+TABLE_PAGE_SIZE), total, totalPages, page, start };
+    }
+    function paginationHtml(key, pageData){
+      if(!pageData.total) return '';
+      const first=pageData.start+1, last=Math.min(pageData.start+TABLE_PAGE_SIZE,pageData.total);
+      const summary='<span class="mono text-[10px] subtle">Showing '+first+'-'+last+' of '+pageData.total+'</span>';
+      if(pageData.totalPages<=1) return '<div class="mt-3">'+summary+'</div>';
+      const button=function(label,target,disabled){ return '<button type="button" data-page-key="'+key+'" data-page="'+target+'" '+(disabled?'disabled ':'')+'class="px-3 py-1.5 rounded-lg border border-[#232833] text-[10px] mono '+(disabled?'subtle opacity-40 cursor-not-allowed':'text-[#a2a9b4] hover:text-white hover:border-[#303747]')+'">'+label+'</button>'; };
+      return '<div class="mt-3 flex flex-wrap items-center justify-between gap-2">'+summary+'<div class="flex items-center gap-2">'+button('Previous',pageData.page-1,pageData.page===1)+'<span class="mono text-[10px] subtle">Page '+pageData.page+' / '+pageData.totalPages+'</span>'+button('Next',pageData.page+1,pageData.page===pageData.totalPages)+'</div></div>';
+    }
+    function bindPagination(el){
+      Array.from(el.querySelectorAll('[data-page-key]')).forEach(function(btn){ btn.addEventListener('click',function(){ changeTablePage(btn.dataset.pageKey,btn.dataset.page); }); });
+    }
+    function changeTablePage(key,page){
+      tablePages[key]=Math.max(1,parseInt(page,10)||1);
+      if(key==='requests'||key==='history') renderRequestsFromCache();
+      else if(key==='keys') renderKeys(apiKeyKeysCache);
+      else if(key==='legacy') renderLegacyKeys(legacyKeysCache);
+      else if(key==='stakes') renderStakeWatch(stakeWatchCache);
+    }
 
     function initControls(){
       const bind=(id,ev,fn)=>{ const el=document.getElementById(id); if(el&&!el.dataset.bound){ el.dataset.bound='1'; el.addEventListener(ev,fn); } };
-      bind('requestSearchInput','input',renderRequestsFromCache);
-      bind('requestFilterSelect','change',renderRequestsFromCache);
-      bind('keySearchInput','input',()=>renderKeys(apiKeyKeysCache));
+      bind('requestSearchInput','input',()=>{ tablePages.requests=1; renderRequestsFromCache(); });
+      bind('requestFilterSelect','change',()=>{ tablePages.requests=1; renderRequestsFromCache(); });
+      bind('keySearchInput','input',()=>{ tablePages.keys=1; renderKeys(apiKeyKeysCache); });
     }
     function parseNote(note){
       const lines=String(note||'').replace(/\\r/g,'').split('\\n');
       const get=l=>{ const row=lines.find(x=>x.startsWith(l+':')); return row?row.slice(l.length+1).trim():''; };
-      return { isContributor: lines[0]==='Contributor Program Application', role:get('Role'), programTier:get('Program Tier'), region:get('Region'), endpoint:get('Endpoint'), freeNote:get('Note') };
+      return { isContributor: lines[0]==='Contributor Program Application', role:get('Role'), programTier:get('Program Tier'), region:get('Region'), endpoint:get('Endpoint'), enode:get('Enode'), freeNote:get('Note') };
     }
     function sourceBadge(src){ const c = src==='contributor' ? 'text-aqua border-aqua/30 bg-aqua/10' : 'text-gold border-gold/30 bg-gold/10'; return '<span class="inline-block mono text-[9px] px-1.5 py-0.5 rounded border '+c+'">'+(src||'developer')+'</span>'; }
 
     function renderRequests(reqs){
       const el=document.getElementById('apiKeyRequestsTable'); if(!el) return;
       if(!reqs.length){ el.innerHTML='<div class="text-[11px] subtle mono">No pending requests.</div>'; return; }
+      const pageData=paginateRows(reqs,'requests');
       let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Source</th><th class="py-2 pr-4">Created</th><th class="py-2">Action</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
-      for(const r of reqs){ const src=r.source||(parseNote(r.note).isContributor?'contributor':'developer'); const m=parseNote(r.note); const t=(r.note||'').replace(/"/g,'&quot;');
+      for(const r of pageData.rows){ const src=r.source||(parseNote(r.note).isContributor?'contributor':'developer'); const m=parseNote(r.note); const t=(r.note||'').replace(/"/g,'&quot;');
         h+='<tr class="align-top"><td class="py-2 pr-4 mono text-gold cursor-pointer" data-copy="'+(r.address||'')+'">'+(r.address?(r.address.slice(0,10)+'…'+r.address.slice(-6)):'')+'</td>';
         h+='<td class="py-2 pr-4 font-bold">'+(r.tier||'')+'</td>';
         h+='<td class="py-2 pr-4">'+sourceBadge(src)+'</td>';
         h+='<td class="py-2 pr-4 subtle">'+String(r.createdAt||'').replace('T',' ').replace('Z','')+'</td>';
         h+='<td class="py-2"><div class="flex gap-2"><button class="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-emerald-500/20 hover:bg-emerald-500/20" data-approve="'+r.id+'">APPROVE</button><button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-rose-500/20 hover:bg-rose-500/20" data-reject="'+r.id+'">REJECT</button></div>';
-        if(m.isContributor){ h+='<div class="mt-2 text-[10px] subtle">role '+(m.role||'-')+' · region '+(m.region||'-')+' · <span title="'+t+'">endpoint '+(m.endpoint||'-')+'</span></div>'; }
+        if(m.isContributor){ h+='<div class="mt-2 text-[10px] subtle">lane <span class="uppercase text-aqua">'+(m.programTier||'-')+'</span> · role '+(m.role||'-')+' · region '+(m.region||'-')+' · <span title="'+t+'">endpoint '+(m.endpoint||'-')+'</span></div>'; }
         else if(r.note){ h+='<div class="mt-1 text-[10px] subtle truncate max-w-[420px]" title="'+t+'">'+r.note+'</div>'; }
         h+='</td></tr>';
       }
-      h+='</tbody></table></div>'; el.innerHTML=h;
+      h+='</tbody></table></div>'+paginationHtml('requests',pageData); el.innerHTML=h;
       Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
       Array.from(el.querySelectorAll('[data-approve]')).forEach(b=>b.addEventListener('click',()=>approveKey(b.getAttribute('data-approve'))));
       Array.from(el.querySelectorAll('[data-reject]')).forEach(b=>b.addEventListener('click',()=>rejectKey(b.getAttribute('data-reject'))));
+      bindPagination(el);
     }
     function renderHistory(rows){
       const el=document.getElementById('apiKeyRequestHistoryTable'); if(!el) return;
       if(!rows.length){ el.innerHTML='<div class="text-[11px] subtle mono">No history.</div>'; return; }
-      const sorted=rows.slice().sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).slice(0,30);
+      const sorted=rows.slice().sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+      const pageData=paginateRows(sorted,'history');
       let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Source</th><th class="py-2 pr-4">Status</th><th class="py-2">Created</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
-      for(const r of sorted){ const src=r.source||(parseNote(r.note).isContributor?'contributor':'developer'); const st=r.status||'pending'; const cls=st==='approved'?'text-emerald-400':st==='rejected'?'text-rose-400':'text-gold';
+      for(const r of pageData.rows){ const src=r.source||(parseNote(r.note).isContributor?'contributor':'developer'); const st=r.status||'pending'; const cls=st==='approved'?'text-emerald-400':st==='rejected'?'text-rose-400':'text-gold';
         h+='<tr><td class="py-2 pr-4 mono text-gold cursor-pointer" data-copy="'+(r.address||'')+'">'+(r.address?(r.address.slice(0,10)+'…'+r.address.slice(-6)):'')+'</td><td class="py-2 pr-4">'+(r.tier||'')+'</td><td class="py-2 pr-4">'+sourceBadge(src)+'</td><td class="py-2 pr-4 font-bold '+cls+'">'+st+'</td><td class="py-2 subtle">'+String(r.createdAt||'').replace('T',' ').replace('Z','')+'</td></tr>';
       }
-      h+='</tbody></table></div>'; el.innerHTML=h;
+      h+='</tbody></table></div>'+paginationHtml('history',pageData); el.innerHTML=h;
       Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
+      bindPagination(el);
     }
     function renderRequestsFromCache(){
       initControls();
@@ -531,7 +644,7 @@ async function main() {
         const src=r.source||(parseNote(r.note).isContributor?'contributor':'developer');
         if(mode!=='all' && src!==mode) return false;
         if(!q) return true;
-        const m=parseNote(r.note); return [r.address,r.tier,r.note,m.role,m.region,m.endpoint].join(' ').toLowerCase().includes(q);
+        const m=parseNote(r.note); return [r.address,r.tier,r.note,m.role,m.region,m.endpoint,m.enode].join(' ').toLowerCase().includes(q);
       });
       renderRequests(pending); renderHistory(apiKeyRequestsCache||[]);
     }
@@ -541,9 +654,9 @@ async function main() {
       catch(e){ if(st) st.textContent='Load failed: '+(e?.message||e); }
     }
     async function approveKey(id){
-      if(!confirm('Approve request '+id+'? Generates an API key + reloads nginx.')) return;
+      if(!confirm('Approve request '+id+'? Contributor approval validates stake and endpoint, proves the Enode against Foundation peers, creates monitoring/canary configuration, and activates OperatorRegistry on-chain.')) return;
       const st=document.getElementById('apiKeyReqStatus'); if(st) st.textContent='Approving…';
-      try{ const r=await adminFetch('/apikey/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); const d=await r.json(); if(!d.ok) throw new Error(d.error||'approve failed'); alert('Approved!\\nTier: '+d.tier+'\\nAddress: '+d.address+'\\nAPI Key: '+d.key); refreshAll(); }
+      try{ const r=await adminFetch('/apikey/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); const d=await r.json(); if(!d.ok) throw new Error(d.error||'approve failed'); const op=d.onboarding?('\\nOperator: ACTIVE\\nReward service: '+d.onboarding.service+'\\nMonitoring route: created'):''; alert('Approved!\\nTier: '+d.tier+'\\nAddress: '+d.address+'\\nAPI Key: '+d.key+op); refreshAll(); }
       catch(e){ if(st) st.textContent='Approve failed: '+(e?.message||e); alert('Approve failed: '+(e?.message||e)); }
     }
     async function rejectKey(id){
@@ -557,12 +670,14 @@ async function main() {
       const q=String((document.getElementById('keySearchInput')||{}).value||'').toLowerCase().trim();
       const rows=(Array.isArray(keys)?keys:[]).filter(k=>!q||[k.keyPrefix,k.address,k.tier,k.status,k.source].join(' ').toLowerCase().includes(q));
       if(!rows.length){ el.innerHTML='<div class="text-[11px] subtle mono">No keys.</div>'; return; }
+      const pageData=paginateRows(rows,'keys');
       let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Prefix</th><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Source</th><th class="py-2 pr-4">Status</th><th class="py-2 pr-4">Created</th><th class="py-2">Action</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
-      for(const k of rows){ h+='<tr><td class="py-2 pr-4 mono text-[#a2a9b4]">'+(k.keyPrefix||'')+'…</td><td class="py-2 pr-4 mono text-gold cursor-pointer" data-copy="'+(k.address||'')+'">'+(k.address?(k.address.slice(0,10)+'…'+k.address.slice(-6)):'')+'</td><td class="py-2 pr-4 font-bold">'+(k.tier||'')+'</td><td class="py-2 pr-4">'+sourceBadge(k.source)+'</td><td class="py-2 pr-4 '+(k.status==='active'?'text-emerald-400':'subtle')+' font-bold">'+(k.status||(k.active?'active':'revoked'))+'</td><td class="py-2 pr-4 subtle">'+String(k.createdAt||'').replace('T',' ').replace('Z','')+'</td><td class="py-2">'+((k.active||k.status==='active')?('<div class="flex gap-2"><button class="bg-aqua/10 text-aqua text-[10px] font-bold px-3 py-1.5 rounded-lg border border-aqua/20 hover:bg-aqua/20" data-rotate="'+(k.id||'')+'" data-rp="'+(k.keyPrefix||'')+'">ROTATE</button><button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-rose-500/20 hover:bg-rose-500/20" data-revoke="'+(k.id||'')+'" data-rp="'+(k.keyPrefix||'')+'">REVOKE</button></div>'):'<span class="subtle">-</span>')+'</td></tr>'; }
-      h+='</tbody></table></div>'; el.innerHTML=h;
+      for(const k of pageData.rows){ h+='<tr><td class="py-2 pr-4 mono text-[#a2a9b4]">'+(k.keyPrefix||'')+'…</td><td class="py-2 pr-4 mono text-gold cursor-pointer" data-copy="'+(k.address||'')+'">'+(k.address?(k.address.slice(0,10)+'…'+k.address.slice(-6)):'')+'</td><td class="py-2 pr-4 font-bold">'+(k.tier||'')+'</td><td class="py-2 pr-4">'+sourceBadge(k.source)+'</td><td class="py-2 pr-4 '+(k.status==='active'?'text-emerald-400':'subtle')+' font-bold">'+(k.status||(k.active?'active':'revoked'))+'</td><td class="py-2 pr-4 subtle">'+String(k.createdAt||'').replace('T',' ').replace('Z','')+'</td><td class="py-2">'+((k.active||k.status==='active')?('<div class="flex gap-2"><button class="bg-aqua/10 text-aqua text-[10px] font-bold px-3 py-1.5 rounded-lg border border-aqua/20 hover:bg-aqua/20" data-rotate="'+(k.id||'')+'" data-rp="'+(k.keyPrefix||'')+'">ROTATE</button><button class="bg-rose-500/10 text-rose-400 text-[10px] font-bold px-3 py-1.5 rounded-lg border border-rose-500/20 hover:bg-rose-500/20" data-revoke="'+(k.id||'')+'" data-rp="'+(k.keyPrefix||'')+'">REVOKE</button></div>'):'<span class="subtle">-</span>')+'</td></tr>'; }
+      h+='</tbody></table></div>'+paginationHtml('keys',pageData); el.innerHTML=h;
       Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
       Array.from(el.querySelectorAll('[data-revoke]')).forEach(b=>b.addEventListener('click',()=>revokeById(b.getAttribute('data-revoke'),b.getAttribute('data-rp'))));
       Array.from(el.querySelectorAll('[data-rotate]')).forEach(b=>b.addEventListener('click',()=>rotateById(b.getAttribute('data-rotate'),b.getAttribute('data-rp'))));
+      bindPagination(el);
     }
     async function loadKeys(){
       initControls();
@@ -574,32 +689,39 @@ async function main() {
     async function rotateById(id,prefix){ if(!id) return; if(!confirm('Rotate key '+(prefix||id)+'? Old key revoked, new key issued.')) return;
       try{ const r=await adminFetch('/apikey/rotate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); const d=await r.json(); if(!d.ok) throw new Error(d.error||'rotate failed'); alert('Rotated!\\nTier: '+d.tier+'\\nAddress: '+d.address+'\\nNew API Key: '+d.key); refreshAll(); }catch(e){ alert('Rotate failed: '+(e?.message||e)); } }
 
+    function renderLegacyKeys(keys){
+      const el=document.getElementById('legacyKeysTable'); if(!el) return;
+      if(!keys.length){ el.innerHTML='<div class="text-[11px] subtle mono">None found in nginx map.</div>'; return; }
+      const pageData=paginateRows(keys,'legacy');
+      let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Key (masked)</th><th class="py-2 pr-4">Type</th><th class="py-2">Copy</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
+      for(const k of pageData.rows){ const masked=k.slice(0,6)+'…'+k.slice(-4); h+='<tr><td class="py-2 pr-4 mono text-rose-300">'+masked+'</td><td class="py-2 pr-4"><span class="mono text-[9px] px-1.5 py-0.5 rounded border border-rose-500/30 text-rose-400 bg-rose-500/10">legacy master</span></td><td class="py-2"><button class="text-[10px] mono px-2 py-1 rounded border border-[#232833] text-[#a2a9b4] hover:text-white" data-copy="'+k+'">copy full</button></td></tr>'; }
+      h+='</tbody></table></div>'+paginationHtml('legacy',pageData); el.innerHTML=h;
+      Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
+      bindPagination(el);
+    }
     async function loadLegacyKeys(){
       const el=document.getElementById('legacyKeysTable'); if(!el) return;
-      try{ const r=await adminFetch('/legacy-keys'); const d=await r.json(); if(!d.ok) throw new Error(d.error||'failed');
-        if(!d.keys||!d.keys.length){ el.innerHTML='<div class="text-[11px] subtle mono">None found in nginx map.</div>'; return; }
-        let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Key (masked)</th><th class="py-2 pr-4">Type</th><th class="py-2">Copy</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
-        for(const k of d.keys){ const masked=k.slice(0,6)+'…'+k.slice(-4); h+='<tr><td class="py-2 pr-4 mono text-rose-300">'+masked+'</td><td class="py-2 pr-4"><span class="mono text-[9px] px-1.5 py-0.5 rounded border border-rose-500/30 text-rose-400 bg-rose-500/10">legacy master</span></td><td class="py-2"><button class="text-[10px] mono px-2 py-1 rounded border border-[#232833] text-[#a2a9b4] hover:text-white" data-copy="'+k+'">copy full</button></td></tr>'; }
-        h+='</tbody></table></div>'; el.innerHTML=h;
-        Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
-      }catch(e){ el.innerHTML='<div class="text-[11px] text-rose-400 mono">Load legacy keys failed: '+(e?.message||e)+'</div>'; }
+      try{ const r=await adminFetch('/legacy-keys'); const d=await r.json(); if(!d.ok) throw new Error(d.error||'failed'); legacyKeysCache=d.keys||[]; renderLegacyKeys(legacyKeysCache); }
+      catch(e){ el.innerHTML='<div class="text-[11px] text-rose-400 mono">Load legacy keys failed: '+(e?.message||e)+'</div>'; }
     }
 
     function renderStakeWatch(rows){
       const el=document.getElementById('stakeWatchTable'); if(!el) return;
       if(!rows.length){ el.innerHTML='<div class="text-[11px] subtle mono">No tracked addresses.</div>'; return; }
+      const pageData=paginateRows(rows,'stakes');
       let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Address</th><th class="py-2 pr-4">Tier</th><th class="py-2 pr-4">Stake</th><th class="py-2 pr-4">Unstake</th><th class="py-2 pr-4">Keys</th><th class="py-2">Hint</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
-      for(const r of rows){ let lbl='STAKED',cls='text-emerald-400'; if(r.unstakeStatus==='withdrawable'){lbl='WITHDRAWABLE';cls='text-rose-400';} else if(r.unstakeStatus==='cooldown'){lbl='COOLDOWN '+Math.max(0,r.cooldownLeftSec)+'s';cls='text-gold';} else if(r.unstakeStatus==='no-stake'){lbl='NO STAKE';cls='subtle';}
+      for(const r of pageData.rows){ let lbl='STAKED',cls='text-emerald-400'; if(r.unstakeStatus==='withdrawable'){lbl='WITHDRAWABLE';cls='text-rose-400';} else if(r.unstakeStatus==='cooldown'){lbl='COOLDOWN '+Math.max(0,r.cooldownLeftSec)+'s';cls='text-gold';} else if(r.unstakeStatus==='no-stake'){lbl='NO STAKE';cls='subtle';}
         const keys=(r.activeKeys||[]).map(k=>(k.keyPrefix||'')+(k.tier?('/'+k.tier):'')).join(', ');
         let hint='-'; if((r.unstakeStatus==='cooldown'||r.unstakeStatus==='withdrawable')&&(r.activeKeys||[]).length>0) hint='consider revoke'; else if(r.unstakeStatus==='staked'&&(r.activeKeys||[]).length>0) hint='key active while staked';
         h+='<tr><td class="py-2 pr-4 mono text-gold cursor-pointer" data-copy="'+(r.address||'')+'">'+(r.address?(r.address.slice(0,10)+'…'+r.address.slice(-6)):'')+'</td><td class="py-2 pr-4 font-bold uppercase">'+(r.tier||'none')+'</td><td class="py-2 pr-4 mono">'+(r.stake||'0')+'</td><td class="py-2 pr-4 mono font-bold '+cls+'">'+lbl+'</td><td class="py-2 pr-4 mono">'+((r.activeKeys||[]).length)+(keys?(' <span class="subtle">('+keys+')</span>'):'')+'</td><td class="py-2 subtle mono">'+hint+'</td></tr>';
       }
-      h+='</tbody></table></div>'; el.innerHTML=h;
+      h+='</tbody></table></div>'+paginationHtml('stakes',pageData); el.innerHTML=h;
       Array.from(el.querySelectorAll('[data-copy]')).forEach(x=>x.addEventListener('click',()=>copyText(x.getAttribute('data-copy'))));
+      bindPagination(el);
     }
     async function loadStakeWatch(){
       const st=document.getElementById('stakeWatchStatus'); if(st) st.textContent='Loading stake watch…';
-      try{ const r=await adminFetch('/stakes'); const d=await r.json(); if(!d.ok) throw new Error(d.error||'failed'); renderStakeWatch(d.rows||[]); if(st) st.textContent='Loaded '+((d.rows||[]).length)+' address(es).'; }
+      try{ const r=await adminFetch('/stakes'); const d=await r.json(); if(!d.ok) throw new Error(d.error||'failed'); stakeWatchCache=d.rows||[]; renderStakeWatch(stakeWatchCache); if(st) st.textContent='Loaded '+stakeWatchCache.length+' address(es).'; }
       catch(e){ if(st) st.textContent='Load failed: '+(e?.message||e); const el=document.getElementById('stakeWatchTable'); if(el) el.innerHTML='<div class="text-[11px] text-rose-400 mono">Load stakes failed: '+(e?.message||e)+'</div>'; }
     }
 
@@ -618,11 +740,30 @@ async function main() {
       catch(e){ st.textContent='Update failed: '+(e?.message||e); }
     }
 
-    function refreshAll(){ loadRequests(); loadKeys(); loadLegacyKeys(); loadStakeWatch(); }
+    async function loadContributionStatus(){
+      const el=document.getElementById('contributionStatus'); if(!el) return;
+      try{
+        const r=await adminFetch('/contribution-status'); const d=await r.json(); if(!d.ok) throw new Error(d.error||'failed');
+        const candidates=new Map(((d.router&&d.router.candidates)||[]).map(x=>[String(x.operator||'').toLowerCase(),x]));
+        const traffic=(d.traffic&&d.traffic.operators)||{};
+        let h='<div class="flex flex-wrap items-center justify-between gap-2"><span class="text-white font-bold">REAL CONTRIBUTION · '+Number(d.canaryPercent||0).toFixed(2)+'% HTTP RPC CANARY</span><span>window '+((d.traffic&&d.traffic.windowMinutes)||120)+' min</span></div>';
+        h+='<div class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">';
+        for(const op of (d.operators||[])){
+          const addr=String(op.operator||'').toLowerCase(), c=candidates.get(addr), t=traffic[addr]||{};
+          const v2=op.contributionPolicyVersion==='v2', healthy=!!(c&&c.healthy);
+          h+='<div class="rounded border border-[#232833] p-2"><div><span class="text-gold">'+(addr?addr.slice(0,10)+'...'+addr.slice(-6):'--')+'</span> · <span class="'+(v2?'text-emerald-400':'subtle')+'">'+(v2?'v2 verified':'v1 legacy')+'</span></div>';
+          h+='<div class="mt-1">P2P '+(c?(c.p2pConnectedAgents+'/2'):(op.p2p?'checking':'unverified'))+' · route <span class="'+(healthy?'text-emerald-400':'subtle')+'">'+(healthy?'HEALTHY':(c&&c.error?c.error:'not in canary'))+'</span></div>';
+          h+='<div class="mt-1">requests '+Number(t.requests||0)+' · success '+(Number(t.successRate||0)*100).toFixed(1)+'% · avg '+(t.avgLatencyMs==null?'--':Number(t.avgLatencyMs).toFixed(1))+'ms · fallbacks '+Number(t.fallbacks||0)+'</div></div>';
+        }
+        h+='</div>'; el.innerHTML=h;
+      }catch(e){ el.innerHTML='<span class="text-rose-400">Contribution status unavailable: '+(e?.message||e)+'</span>'; }
+    }
+    function refreshAll(){ loadRequests(); loadKeys(); loadLegacyKeys(); loadStakeWatch(); loadContributionStatus(); }
 
     document.addEventListener('click', function(e){ const m=document.getElementById('latestRewardsModal'); if(!m.classList.contains('hidden') && e.target===m) closeLatestRewards(); });
 
     // init
+    try{ initAdminTabs(); }catch(e){}
     try{ updateLabels(); }catch(e){}
     try{ loadHealth(); refreshAll(); }catch(e){}
     setInterval(loadHealth, 60000);
@@ -630,7 +771,7 @@ async function main() {
 </body>
 </html>
 `;
-  fs.writeFileSync('/var/www/html/admin/index.html', html);
+  fs.writeFileSync(DASHBOARD_OUTPUT, html);
   console.log('dashboard written', new Date().toISOString());
 }
 

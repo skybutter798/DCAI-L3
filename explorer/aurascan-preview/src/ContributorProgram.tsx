@@ -14,22 +14,31 @@ const contributorTiers = {
     label: 'Observer',
     internalTier: 'basic',
     stake: '1000',
-    roleHint: 'Single-region contributor or early-stage indexer',
-    throughput: 'entry contributor lane',
+    roleHint: 'Single-region RPC or indexer entry lane',
+    throughput: '10 req/s credential',
+    rewardFactor: '1.00x',
+    quality: '98% floor | RPC p95 <= 800ms | indexer lag <= 12 blocks',
+    regionRequired: false,
   },
   core: {
     label: 'Core',
     internalTier: 'pro',
     stake: '5000',
-    roleHint: 'Reliable ecosystem operator with steady uptime',
-    throughput: 'core contributor lane',
+    roleHint: 'Production RPC or indexer with a declared region',
+    throughput: '50 req/s credential',
+    rewardFactor: '1.20x',
+    quality: '99% floor | RPC p95 <= 500ms | indexer lag <= 6 blocks',
+    regionRequired: true,
   },
   backbone: {
     label: 'Backbone',
     internalTier: 'ultra',
     stake: '10000',
-    roleHint: 'High-availability infra / backbone partner',
-    throughput: 'high-capacity contributor lane',
+    roleHint: 'Critical high-capacity RPC or indexer lane',
+    throughput: '200 req/s credential',
+    rewardFactor: '1.50x',
+    quality: '99.9% floor | RPC p95 <= 250ms | indexer lag <= 2 blocks',
+    regionRequired: true,
   },
 } as const;
 
@@ -68,6 +77,7 @@ export default function ContributorProgram() {
   const [tier, setTier] = useState<ContributorTierKey>('observer');
   const [region, setRegion] = useState('');
   const [endpoint, setEndpoint] = useState('');
+  const [enode, setEnode] = useState('');
   const [note, setNote] = useState('');
   const [lastReq, setLastReq] = useState<any>(null);
   const [revealedKeys, setRevealedKeys] = useState<RevealedKey[] | null>(null);
@@ -111,10 +121,11 @@ export default function ContributorProgram() {
       `Internal Tier: ${selectedTier.internalTier}`,
       `Region: ${region || '-'}`,
       `Endpoint: ${endpoint || '-'}`,
+      `Enode: ${enode || '-'}`,
       `Note: ${note || '-'}`,
     ];
     return lines.join('\n');
-  }, [role, tier, selectedTier.internalTier, region, endpoint, note]);
+  }, [role, tier, selectedTier.internalTier, region, endpoint, enode, note]);
 
   const roleLabel = role === 'indexer' ? 'Indexer' : 'RPC Provider';
 
@@ -236,6 +247,17 @@ export default function ContributorProgram() {
     if (!addr) return;
     setErr(null);
     try {
+      if (chainId !== 18441) throw new Error('Switch wallet to DCAI L3 (chainId 18441) first.');
+      if (!endpoint.trim()) throw new Error('A public HTTP(S) service endpoint is required.');
+      if (!/^enode:\/\/[0-9a-f]{128}@(\d{1,3}\.){3}\d{1,3}:\d{1,5}$/i.test(enode.trim())) {
+        throw new Error('A valid public Geth Enode is required to prove that you operate a real DCAI node.');
+      }
+      if (selectedTier.regionRequired && !region.trim()) {
+        throw new Error(`${selectedTier.label} contributors must declare a region.`);
+      }
+      if (stakeTierLabel !== selectedTier.internalTier) {
+        throw new Error(`Selected ${selectedTier.label} requires an active ${selectedTier.internalTier} stake.`);
+      }
       setBusy('Submitting contributor application…');
       const eth = (window as any).ethereum;
       const provider = new ethers.BrowserProvider(eth);
@@ -414,6 +436,8 @@ export default function ContributorProgram() {
                     </div>
                     <div className="mt-1 text-[15px] font-mono text-txt tnum">{fmtNum(item.stake)} <span className="text-[11px] text-txt-3">{NATIVE_SYMBOL}</span></div>
                     <div className="mt-1 text-[10px] text-txt-3 leading-4">{item.roleHint}</div>
+                    <div className="mt-2 text-[10px] font-mono text-gold">{item.throughput} · reward {item.rewardFactor}</div>
+                    <div className="mt-1 text-[9px] text-txt-3 leading-4">{item.quality}</div>
                   </button>
                 );
               })}
@@ -438,7 +462,7 @@ export default function ContributorProgram() {
               <input
                 value={region}
                 onChange={(e) => setRegion(e.target.value)}
-                placeholder="Region (e.g. SG / MY / JP)"
+                placeholder={`Region (e.g. SG / MY / JP)${selectedTier.regionRequired ? ' - required' : ''}`}
                 className="bg-ink-900 border border-line rounded-lg px-3 py-2.5 text-[12px] font-mono text-txt outline-none focus:border-gold/50 transition-colors"
               />
               <input
@@ -449,6 +473,16 @@ export default function ContributorProgram() {
               />
             </div>
 
+            <input
+              value={enode}
+              onChange={(e) => setEnode(e.target.value)}
+              placeholder="Enode: enode://<128-hex-node-id>@<public-ip>:30303"
+              className="mt-2.5 w-full bg-ink-900 border border-line rounded-lg px-3 py-2.5 text-[12px] font-mono text-txt outline-none focus:border-gold/50 transition-colors"
+            />
+            <div className="mt-1 text-[10px] text-txt-3 leading-4">
+              Your Enode IP must match the Endpoint server. Approval connects it to Foundation RPC peers and verifies the live P2P identity.
+            </div>
+
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
@@ -457,8 +491,13 @@ export default function ContributorProgram() {
             />
 
             <div className="mt-3 flex flex-wrap gap-2">
-              <Btn tone="primary" disabled={!addr} onClick={requestContributorKey}>Submit application</Btn>
+              <Btn tone="primary" disabled={!addr || !endpoint.trim() || !enode.trim() || (selectedTier.regionRequired && !region.trim())} onClick={requestContributorKey}>Submit application</Btn>
               <Btn disabled={!addr} onClick={revealMyKeys}>Reveal my credentials</Btn>
+            </div>
+
+            <div className="mt-3 rounded-lg border border-line bg-ink-900 p-3 text-[10px] text-txt-3 leading-5">
+              <span className="text-txt font-semibold">{selectedTier.label} policy:</span>{' '}
+              {selectedTier.throughput}; measured score capacity {selectedTier.rewardFactor}. A higher lane has a stricter SLO, so stake alone never guarantees rewards.
             </div>
 
             {lastReq ? (
@@ -534,6 +573,7 @@ RPC_API_KEY=<your contributor key>
 ROLE=${role}
 REGION=${region || '<your region>'}
 ENDPOINT=${endpoint || '<your endpoint>'}
+ENODE=${enode || '<your public enode>'}
 
 # Reward monitoring
 REWARDS_URL=${publicBase}/rewards/latest.json

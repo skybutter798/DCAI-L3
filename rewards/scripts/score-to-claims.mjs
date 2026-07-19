@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { CONTRIBUTOR_POLICY_VERSION, policyForOperator } from '../monitor/contributor-policy.mjs';
 
 // score-to-claims.mjs
 // Converts a measurement snapshot into claims.json
@@ -77,22 +78,24 @@ console.error('[score] weights', JSON.stringify(WEIGHTS), '·', weightsSource);
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
-function scoreRpc(m) {
+function scoreRpc(m, policy) {
   const uptime = m?.uptime ?? 0;
   const p95 = m?.p95_ms ?? 1e9;
   const err = m?.error_rate ?? 1;
-  const A = clamp((uptime - 0.98) / (1 - 0.98), 0, 1);
-  const L = clamp((800 - p95) / 800, 0, 1);
-  const E = clamp((0.02 - err) / 0.02, 0, 1);
+  const target = policy.slo;
+  const A = clamp((uptime - target.uptimeFloor) / (1 - target.uptimeFloor), 0, 1);
+  const L = clamp((target.rpcP95Ms - p95) / target.rpcP95Ms, 0, 1);
+  const E = clamp((target.errorRateMax - err) / target.errorRateMax, 0, 1);
   const rawScore = A * (0.6 * L + 0.4 * E);
   return { A, L, E, rawScore };
 }
 
-function scoreIndexer(m) {
+function scoreIndexer(m, policy) {
   const uptime = m?.uptime ?? 0;
   const lag = m?.lag_blocks ?? 1e9;
-  const A = clamp((uptime - 0.98) / (1 - 0.98), 0, 1);
-  const G = clamp((12 - lag) / 12, 0, 1);
+  const target = policy.slo;
+  const A = clamp((uptime - target.uptimeFloor) / (1 - target.uptimeFloor), 0, 1);
+  const G = clamp((target.indexerLagBlocks - lag) / target.indexerLagBlocks, 0, 1);
   const rawScore = A * G;
   return { A, G, rawScore };
 }
@@ -115,14 +118,38 @@ function scoreMultiregion(m) {
   return { ok, req, rawScore };
 }
 
+function scoreTraffic(m, policy) {
+  const requests = Math.max(0, Number(m?.requests || 0));
+  const successRate = clamp(Number(m?.success_rate || 0), 0, 1);
+  const p95ms = m?.p95_ms == null ? null : Number(m.p95_ms);
+  const targets = { observer:25, core:100, backbone:250 };
+  const target = targets[policy.key] || 25;
+  const volume = requests > 0 ? clamp(0.5 + 0.5 * Math.sqrt(requests / target), 0, 1) : 0;
+  const latency = p95ms == null ? 0 : clamp((policy.slo.rpcP95Ms - p95ms) / policy.slo.rpcP95Ms, 0, 1);
+  const rawScore = volume * (0.6 * successRate + 0.4 * latency);
+  return { requests, target, successRate, p95ms, volume, latency, rawScore };
+}
+
+function scoreP2p(m) {
+  const connectedAgents = Math.max(0, Number(m?.connectedAgents || 0));
+  return { connectedAgents, rawScore:clamp(connectedAgents / 2, 0, 1) };
+}
+
 function buildBreakdown(op) {
   const services = op.services || {};
   const metrics = op.metrics || {};
+  const policy = policyForOperator(op);
+  const capacityFactor = policy.rewardFactor;
+  const realContribution = op.contributionPolicyVersion === 'v2';
 
-  const rpcBits = scoreRpc(metrics.rpc || {});
-  const indexerBits = scoreIndexer(metrics.indexer || {});
+  const rpcBits = scoreRpc(metrics.rpc || {}, policy);
+  const indexerBits = scoreIndexer(metrics.indexer || {}, policy);
   const storageBits = scoreStorage(metrics.storage || {});
   const multiregionBits = scoreMultiregion(metrics.multiregion || {});
+  const trafficBits = scoreTraffic(metrics.traffic || {}, policy);
+  const p2pBits = scoreP2p(metrics.p2p || {});
+  const rpcWorkFactor = realContribution ? 0.5 + 0.3 * trafficBits.rawScore + 0.2 * p2pBits.rawScore : 1;
+  const indexerWorkFactor = realContribution ? 0.7 + 0.3 * p2pBits.rawScore : 1;
 
   const breakdown = {
     rpc: {
@@ -139,7 +166,8 @@ function buildBreakdown(op) {
         errors: rpcBits.E
       },
       rawScore: services.rpc ? rpcBits.rawScore : 0,
-      weightedScore: services.rpc ? WEIGHTS.rpc * rpcBits.rawScore : 0
+      contributionAdjustedRawScore: services.rpc ? rpcBits.rawScore * rpcWorkFactor : 0,
+      weightedScore: services.rpc ? WEIGHTS.rpc * rpcBits.rawScore * rpcWorkFactor * capacityFactor : 0
     },
     indexer: {
       enabled: !!services.indexer,
@@ -153,7 +181,8 @@ function buildBreakdown(op) {
         freshness: indexerBits.G
       },
       rawScore: services.indexer ? indexerBits.rawScore : 0,
-      weightedScore: services.indexer ? WEIGHTS.indexer * indexerBits.rawScore : 0
+      contributionAdjustedRawScore: services.indexer ? indexerBits.rawScore * indexerWorkFactor : 0,
+      weightedScore: services.indexer ? WEIGHTS.indexer * indexerBits.rawScore * indexerWorkFactor * capacityFactor : 0
     },
     storage: {
       enabled: !!services.storage,
@@ -169,7 +198,7 @@ function buildBreakdown(op) {
         errors: storageBits.E
       },
       rawScore: services.storage ? storageBits.rawScore : 0,
-      weightedScore: services.storage ? WEIGHTS.storage * storageBits.rawScore : 0
+      weightedScore: services.storage ? WEIGHTS.storage * storageBits.rawScore * capacityFactor : 0
     },
     multiregion: {
       enabled: !!services.multiregion,
@@ -183,7 +212,7 @@ function buildBreakdown(op) {
         regions_required: multiregionBits.req
       },
       rawScore: services.multiregion ? multiregionBits.rawScore : 0,
-      weightedScore: services.multiregion ? WEIGHTS.multiregion * multiregionBits.rawScore : 0
+      weightedScore: services.multiregion ? WEIGHTS.multiregion * multiregionBits.rawScore * capacityFactor : 0
     }
   };
 
@@ -195,6 +224,19 @@ function buildBreakdown(op) {
 
   return {
     operator: op.operator,
+    programTier: policy.key,
+    tierPolicy: {
+      version: CONTRIBUTOR_POLICY_VERSION,
+      rewardFactor: capacityFactor,
+      slo: policy.slo,
+    },
+    contribution: {
+      version:realContribution ? 'v2-real-work' : 'v1-legacy',
+      traffic:trafficBits,
+      p2p:p2pBits,
+      rpcWorkFactor,
+      indexerWorkFactor,
+    },
     services,
     metrics,
     breakdown,
@@ -217,6 +259,9 @@ const claims = scored
 
     return {
       operator: x.operator,
+      programTier: x.programTier,
+      tierPolicy: x.tierPolicy,
+      contribution:x.contribution,
       amountWei: amountWei.toString(),
       sharePct: sumScore === 0 ? 0 : (x.totalScore / sumScore),
       totalScore: x.totalScore,
@@ -229,7 +274,8 @@ const claims = scored
 const out = {
   epochId: input.epochId,
   dayId: input.dayId,
-  scoringVersion: 'v0.2-breakdown',
+  scoringVersion: 'v0.4-real-contribution',
+  contributorPolicyVersion: CONTRIBUTOR_POLICY_VERSION,
   dailyCapWei: dailyCapWei.toString(),
   epochsPerDay: Number(epochsPerDay),
   epochPoolWei: epochPoolWei.toString(),

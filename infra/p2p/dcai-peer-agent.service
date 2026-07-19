@@ -1,0 +1,19 @@
+[Unit]
+Description=DCAI Foundation Geth peer verification agent
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dcai/p2p-agent
+ExecStart=/usr/bin/python3 /opt/dcai/p2p-agent/peer-agent.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadOnlyPaths=/opt/dcai/rpc/data/geth.ipc /etc/dcai-p2p-agent.env
+
+[Install]
+WantedBy=multi-user.target
