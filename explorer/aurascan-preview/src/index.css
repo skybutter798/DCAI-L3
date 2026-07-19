@@ -105,6 +105,29 @@ body {
   animation: row-flash 0.9s ease-out 1;
 }
 
+/* A real head change shifts one new block into the flow, once. */
+@keyframes block-arrival-enter {
+  0% {
+    transform: translateX(14px);
+    box-shadow: 0 0 0 5px rgba(34, 211, 238, 0.16);
+  }
+  100% {
+    transform: translateX(0);
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+.block-arrival-enter {
+  animation: block-arrival-enter 0.8s ease-out 1;
+}
+
+@keyframes block-event-signal {
+  0% { transform: scaleY(0.5); opacity: 0.45; }
+  100% { transform: scaleY(1); opacity: 1; }
+}
+.block-event-signal {
+  animation: block-event-signal 0.8s ease-out 1;
+}
+
 /* Numeric alignment for data columns */
 .tnum {
   font-variant-numeric: tabular-nums;
@@ -219,7 +242,9 @@ body {
   .cyber-grid,
   .cursor-blink::after,
   .live-dot,
-  .row-flash {
+  .row-flash,
+  .block-arrival-enter,
+  .block-event-signal {
     animation: none !important;
   }
 }
@@ -229,6 +254,8 @@ body {
 .fx-off .cyber-grid,
 .fx-off .cursor-blink::after,
 .fx-off .live-dot,
-.fx-off .row-flash {
+.fx-off .row-flash,
+.fx-off .block-arrival-enter,
+.fx-off .block-event-signal {
   animation: none !important;
 }
