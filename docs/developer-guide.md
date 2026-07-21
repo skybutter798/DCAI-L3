@@ -4,10 +4,10 @@
 
 - Chain ID: **18441**
 - Currency symbol: **tDCAI**
-- Explorer: `http://139.180.140.143/`
+- Explorer: `https://explorer.dcai.ai/`
 - Faucet:
-  - Status: `http://139.180.140.143/faucet/`
-  - Request: `POST http://139.180.140.143/faucet/request` with JSON `{ "address": "0x..." }`
+  - Status: `https://explorer.dcai.ai/faucet/`
+  - Request: `POST https://explorer.dcai.ai/faucet/request` with JSON `{ "address": "0x..." }`
 
 ## 2) RPC endpoints
 
@@ -16,7 +16,7 @@ RPC is API-key gated.
 ### Option A (recommended for server/backend): header-based API key
 
 HTTP:
-- `http://139.180.140.143/rpc/`
+- `https://explorer.dcai.ai/rpc/`
 
 Add header:
 - `X-API-Key: <YOUR_KEY>`
@@ -26,10 +26,10 @@ Add header:
 Some wallets cannot set custom headers. Use the path-key form:
 
 HTTP:
-- `http://139.180.140.143/rpc/<YOUR_KEY>/`
+- `https://explorer.dcai.ai/rpc/<YOUR_KEY>/`
 
 WebSocket:
-- `ws://139.180.140.143/ws/<YOUR_KEY>/`
+- `wss://explorer.dcai.ai/ws/<YOUR_KEY>/`
 
 > Keep the key private. For production, issue per-partner keys and rotate regularly.
 
@@ -38,19 +38,19 @@ WebSocket:
 1. Open MetaMask → Settings → Networks → Add network
 2. Fill:
    - Network name: `DCAI Testnet`
-   - RPC URL: `http://139.180.140.143/rpc/<YOUR_KEY>/`
+   - RPC URL: `https://explorer.dcai.ai/rpc/<YOUR_KEY>/`
    - Chain ID: `18441`
    - Currency symbol: `tDCAI`
-   - Block explorer URL: `http://139.180.140.143/`
+   - Block explorer URL: `https://explorer.dcai.ai/`
 
 ## 4) Get tDCAI (Faucet)
 
 Example:
 
 ```bash
-curl -s http://139.180.140.143/faucet/ | jq
+curl -s https://explorer.dcai.ai/faucet/ | jq
 
-curl -s -X POST http://139.180.140.143/faucet/request \
+curl -s -X POST https://explorer.dcai.ai/faucet/request \
   -H 'Content-Type: application/json' \
   --data '{"address":"0xYOUR_ADDRESS"}'
 ```
@@ -60,7 +60,7 @@ curl -s -X POST http://139.180.140.143/faucet/request \
 ### chainId
 
 ```bash
-curl -s http://139.180.140.143/rpc/<YOUR_KEY>/ \
+curl -s https://explorer.dcai.ai/rpc/<YOUR_KEY>/ \
   -H 'Content-Type: application/json' \
   --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}'
 ```
@@ -68,7 +68,7 @@ curl -s http://139.180.140.143/rpc/<YOUR_KEY>/ \
 ### latest block
 
 ```bash
-curl -s http://139.180.140.143/rpc/<YOUR_KEY>/ \
+curl -s https://explorer.dcai.ai/rpc/<YOUR_KEY>/ \
   -H 'Content-Type: application/json' \
   --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
@@ -78,7 +78,7 @@ curl -s http://139.180.140.143/rpc/<YOUR_KEY>/ \
 ```js
 import { ethers } from "ethers";
 
-const RPC = "http://139.180.140.143/rpc/<YOUR_KEY>/";
+const RPC = "https://explorer.dcai.ai/rpc/<YOUR_KEY>/";
 const provider = new ethers.JsonRpcProvider(RPC, 18441);
 
 console.log("chainId", (await provider.getNetwork()).chainId);

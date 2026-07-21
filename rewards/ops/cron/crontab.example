@@ -2,7 +2,7 @@
 # (You will likely generate that file from your scoring service.)
 
 # Every 10 minutes (adjust as desired)
-*/10 * * * * RPC_URL='http://139.180.140.143/rpc/<KEY>/' PRIVATE_KEY='0x...' DISTRIBUTOR_ADDRESS='0x...' CLAIMS_JSON='/opt/dcai/rewards/inbox/claims.json' OUT_JSON='/opt/dcai/rewards/out/epoch-out.json' /opt/dcai/rewards/publish-epoch.sh >> /opt/dcai/rewards/cron.log 2>&1
+*/10 * * * * RPC_URL='https://explorer.dcai.ai/rpc/<KEY>/' PRIVATE_KEY='0x...' DISTRIBUTOR_ADDRESS='0x...' CLAIMS_JSON='/opt/dcai/rewards/inbox/claims.json' OUT_JSON='/opt/dcai/rewards/out/epoch-out.json' /opt/dcai/rewards/publish-epoch.sh >> /opt/dcai/rewards/cron.log 2>&1
 
 # Full pipeline example: probe -> score -> publish
-# */10 * * * * RPC_URL='http://139.180.140.143/rpc/<KEY>/' PRIVATE_KEY='0x...' DISTRIBUTOR_ADDRESS='0x...' CONFIG_JSON='/opt/dcai/rewards/monitor/config.json' MEASUREMENTS_JSON='/opt/dcai/rewards/inbox/measurements.json' CLAIMS_JSON='/opt/dcai/rewards/inbox/claims.json' OUT_JSON='/opt/dcai/rewards/out/epoch-out.json' /opt/dcai/rewards/run-epoch.sh >> /opt/dcai/rewards/cron.log 2>&1
+# */10 * * * * RPC_URL='https://explorer.dcai.ai/rpc/<KEY>/' PRIVATE_KEY='0x...' DISTRIBUTOR_ADDRESS='0x...' CONFIG_JSON='/opt/dcai/rewards/monitor/config.json' MEASUREMENTS_JSON='/opt/dcai/rewards/inbox/measurements.json' CLAIMS_JSON='/opt/dcai/rewards/inbox/claims.json' OUT_JSON='/opt/dcai/rewards/out/epoch-out.json' /opt/dcai/rewards/run-epoch.sh >> /opt/dcai/rewards/cron.log 2>&1

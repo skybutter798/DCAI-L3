@@ -16,7 +16,7 @@ return [
             'http://207.148.72.238:8545',
         ],
         'blockExplorerUrls' => [
-            'http://139.180.140.143/',
+            'https://explorer.dcai.ai/',
         ],
     ],
     'survey' => [

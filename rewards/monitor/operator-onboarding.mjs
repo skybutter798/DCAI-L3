@@ -204,7 +204,7 @@ export function buildContributorConfig(currentConfig, request, preflight, option
   if (!/^[0-9a-f]{32}$/.test(routeKey)) throw new Error('Invalid monitoring route key');
   const slug = spec.operator.slice(2).toLowerCase();
   const routePath = `/op/${slug}/${spec.service}/${routeKey}/`;
-  const routeUrl = routeBaseUrl(options.routeBase || 'http://139.180.140.143') + routePath;
+  const routeUrl = routeBaseUrl(options.routeBase || 'https://explorer.dcai.ai') + routePath;
   if (!Array.isArray(preflight.addresses) || !preflight.addresses.includes(p2p.address)) {
     throw new Error('Verified Enode address is not present in the endpoint DNS result');
   }

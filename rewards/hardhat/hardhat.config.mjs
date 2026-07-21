@@ -6,7 +6,7 @@ export default {
   solidity: '0.8.20',
   networks: {
     dcai: {
-      url: RPC_URL || 'http://139.180.140.143/rpc/<YOUR_KEY>/',
+      url: RPC_URL || 'https://explorer.dcai.ai/rpc/<YOUR_KEY>/',
       chainId: 18441,
       accounts: PRIVATE_KEY ? [PRIVATE_KEY] : []
     }

@@ -18,15 +18,15 @@ This repository documents the current **DCAI AppChain Testnet** deployment (Sche
 
 ## Public endpoints (via unified entry)
 
-Unified entry (nginx): `http://139.180.140.143`
+Unified entry (nginx): `https://explorer.dcai.ai`
 
-- Explorer: `http://139.180.140.143/`
+- Explorer: `https://explorer.dcai.ai/`
 - Faucet:
-  - Status: `http://139.180.140.143/faucet/`
-  - Request: `POST http://139.180.140.143/faucet/request` with JSON `{ "address": "0x..." }`
+  - Status: `https://explorer.dcai.ai/faucet/`
+  - Request: `POST https://explorer.dcai.ai/faucet/request` with JSON `{ "address": "0x..." }`
 - RPC (API-key gated):
-  - HTTP: `http://139.180.140.143/rpc/`
-  - WS: `ws://139.180.140.143/ws/`
+  - HTTP: `https://explorer.dcai.ai/rpc/`
+  - WS: `wss://explorer.dcai.ai/ws/`
 - Direct debug paths:
   - `/rpc1/`, `/rpc2/`, `/ws1/`, `/ws2/`
 

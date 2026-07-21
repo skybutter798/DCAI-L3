@@ -5,7 +5,7 @@
 ### Chain height (via RPC)
 
 ```bash
-curl -s http://139.180.140.143/rpc/ \
+curl -s https://explorer.dcai.ai/rpc/ \
   -H "X-API-Key: <YOUR_KEY>" \
   -H "Content-Type: application/json" \
   --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
@@ -101,7 +101,7 @@ On infra-1:
 - Optional full-pipeline script: `/opt/dcai/rewards/run-epoch.sh`
 - Input template: `/opt/dcai/rewards/inbox/claims.json`
 - Output/merkle file: `/opt/dcai/rewards/out/epoch-out.json`
-- Public proof mirror: `/var/www/html/rewards/latest.json` (served at `http://<infra>/rewards/latest.json`)
+- Public proof mirror: `/var/www/html/rewards/latest.json` (served at `https://explorer.dcai.ai/rewards/latest.json`)
 
 ### Operator auto-claim cron (operator-side)
 On contributor box (example):

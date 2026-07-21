@@ -1,6 +1,6 @@
 {
   "rpc": {
-    "url": "http://139.180.140.143/rpc/<KEY>/",
+    "url": "https://explorer.dcai.ai/rpc/<KEY>/",
     "timeoutMs": 2000,
     "samplesPerEpoch": 10,
     "methods": [
@@ -20,8 +20,8 @@
   "multiregion": {
     "enabled": false,
     "regions": [
-      {"name": "rpc1", "url": "http://139.180.140.143/rpc1/"},
-      {"name": "rpc2", "url": "http://139.180.140.143/rpc2/"}
+      {"name": "rpc1", "url": "https://explorer.dcai.ai/rpc1/"},
+      {"name": "rpc2", "url": "https://explorer.dcai.ai/rpc2/"}
     ]
   },
   "operators": [

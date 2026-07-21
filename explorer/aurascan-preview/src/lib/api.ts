@@ -135,7 +135,7 @@ export const adminApiBase = (() => {
   try {
     return `${window.location.protocol}//${window.location.hostname}/admin/api`;
   } catch {
-    return 'http://139.180.140.143/admin/api';
+    return 'https://explorer.dcai.ai/admin/api';
   }
 })();
 
@@ -143,6 +143,6 @@ export const publicBase = (() => {
   try {
     return `${window.location.protocol}//${window.location.hostname}`;
   } catch {
-    return 'http://139.180.140.143';
+    return 'https://explorer.dcai.ai';
   }
 })();

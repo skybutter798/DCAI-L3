@@ -69,7 +69,7 @@ test('builds one idempotent operator record and a restricted nginx route', () =>
   const initial = { weights:{ rpc:40, indexer:20, storage:30, multiregion:10 }, operators:[] };
   const first = buildContributorConfig(initial, request, { selectedAddress:'8.8.8.8', addresses:['8.8.8.8'] }, {
     routeKey:'a'.repeat(32),
-    routeBase:'http://139.180.140.143',
+    routeBase:'https://explorer.dcai.ai',
     approvedAt:'2026-01-01T00:00:00Z',
     p2pVerification:{
       enode:`enode://${'a'.repeat(128)}@8.8.8.8:30303`, nodeId:'a'.repeat(128), address:'8.8.8.8', port:30303,
@@ -88,7 +88,7 @@ test('builds one idempotent operator record and a restricted nginx route', () =>
 
   const second = buildContributorConfig(first.config, request, { selectedAddress:'1.1.1.1', addresses:['1.1.1.1', '8.8.8.8'] }, {
     routeKey:'b'.repeat(32),
-    routeBase:'http://139.180.140.143',
+    routeBase:'https://explorer.dcai.ai',
     approvedAt:'2026-01-02T00:00:00Z',
     p2pVerification:{
       enode:`enode://${'a'.repeat(128)}@8.8.8.8:30303`, nodeId:'a'.repeat(128), address:'8.8.8.8', port:30303,
