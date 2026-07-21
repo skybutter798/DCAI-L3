@@ -16,6 +16,7 @@ import {
   DEFAULT_PEER_AGENTS,
   rollbackFoundationPeers,
 } from './peer-client.mjs';
+import { readFeaturedTokens, writeFeaturedTokens } from './featured-tokens.mjs';
 
 function readEnvFileValue(path, key) {
   try {
@@ -46,6 +47,7 @@ const P2P_AGENT_TOKEN = process.env.P2P_AGENT_TOKEN || readEnvFileValue('/opt/dc
 const P2P_AGENT_URLS = String(process.env.P2P_AGENT_URLS || DEFAULT_PEER_AGENTS.join(','))
   .split(',').map((value) => value.trim()).filter(Boolean);
 const TRAFFIC_STATS_PATH = process.env.TRAFFIC_STATS_PATH || '/opt/dcai/rewards/monitor/traffic-stats.json';
+const FEATURED_TOKENS_PATH = process.env.FEATURED_TOKENS_PATH || '/var/www/html/featured-tokens.json';
 
 // --- API key system config ---
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
@@ -932,6 +934,26 @@ const server = http.createServer(async (req, res) => {
 
 
   // ---------- Existing monitor endpoints ----------
+
+  // --- Explorer featured tokens (persistent; public JSON is served by nginx) ---
+  if ((pathname === '/api/featured-tokens' || pathname === '/featured-tokens') && req.method === 'GET') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
+    try {
+      return sendJson(res, 200, { ok: true, ...readFeaturedTokens(FEATURED_TOKENS_PATH) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if ((pathname === '/api/featured-tokens' || pathname === '/featured-tokens') && req.method === 'POST') {
+    if (!isAdmin(req)) return sendJson(res, 401, { error: 'admin only' });
+    try {
+      const document = writeFeaturedTokens(FEATURED_TOKENS_PATH, JSON.parse(await readBody(req) || '{}'));
+      return sendJson(res, 200, { ok: true, ...document });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
 
   // --- Config ---
   if ((pathname === '/api/config' || pathname === '/config') && req.method === 'GET') {

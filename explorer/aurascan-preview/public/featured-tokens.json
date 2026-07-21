@@ -6,7 +6,9 @@
       "name": "SBtoken",
       "type": "erc20",
       "decimals": 18,
-      "note": "Official featured"
+      "note": "Official featured",
+      "enabled": true
     }
-  ]
+  ],
+  "updatedAt": null
 }

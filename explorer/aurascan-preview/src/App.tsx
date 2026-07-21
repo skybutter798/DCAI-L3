@@ -1851,7 +1851,7 @@ const TokensView = ({
         setFeaturedLoading(true);
         const res = await fetch('/featured-tokens.json', { cache: 'no-store' });
         const j = await res.json();
-        const arr = Array.isArray(j?.featured) ? j.featured : [];
+        const arr = Array.isArray(j?.featured) ? j.featured.filter((token: any) => token?.enabled !== false) : [];
         if (!cancelled) setFeatured(arr);
       } catch {
         if (!cancelled) setFeatured([]);
@@ -1904,7 +1904,7 @@ const TokensView = ({
               })}
             </div>
           ) : (
-            <div className="text-[12px] text-txt-3">No featured tokens configured (edit /featured-tokens.json).</div>
+            <div className="text-[12px] text-txt-3">No featured tokens are enabled. Configure them in the Admin console.</div>
           )}
         </div>
       </Card>

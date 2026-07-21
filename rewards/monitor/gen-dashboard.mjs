@@ -168,6 +168,7 @@ async function main() {
         <button id="tabButton-overview" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-overview" aria-selected="true" data-admin-tab="overview">Overview</button>
         <button id="tabButton-operators" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-operators" aria-selected="false" data-admin-tab="operators">Operators</button>
         <button id="tabButton-api-access" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-api-access" aria-selected="false" data-admin-tab="api-access">API Access</button>
+        <button id="tabButton-tokens" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-tokens" aria-selected="false" data-admin-tab="tokens">Featured Tokens</button>
         <button id="tabButton-infrastructure" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-infrastructure" aria-selected="false" data-admin-tab="infrastructure">Infrastructure</button>
         <button id="tabButton-security" type="button" class="admin-tab px-4 py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition" role="tab" aria-controls="tabPanel-security" aria-selected="false" data-admin-tab="security">Security</button>
       </div>
@@ -347,6 +348,56 @@ async function main() {
     </section>
 
     </div>
+    <div id="tabPanel-tokens" role="tabpanel" aria-labelledby="tabButton-tokens" data-tab-panel="tokens" hidden>
+
+    <!-- Explorer featured tokens -->
+    <section class="card p-5 mb-6">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-bold">Explorer Featured Tokens</h2>
+          <p class="text-[11px] text-[#a2a9b4] mt-1 max-w-3xl">Controls the curated cards shown at <a href="/tokens" target="_blank" class="text-gold hover:underline">/tokens ↗</a>. Changes stay persistent across Explorer deployments. Disabled entries remain saved but are hidden publicly.</p>
+        </div>
+        <button type="button" onclick="saveFeaturedTokens()" id="featuredSaveButton" class="bg-gold text-ink-950 text-[11px] font-bold px-4 py-2 rounded-lg hover:bg-gold-2">Save changes</button>
+      </div>
+
+      <form class="mt-5 rounded-xl bg-ink-900 border border-[#232833] p-4" onsubmit="applyFeaturedToken(event)">
+        <div class="flex items-center justify-between gap-2 mb-3">
+          <h3 id="featuredFormTitle" class="text-[11px] font-bold uppercase tracking-widest subtle">Add token</h3>
+          <button type="button" onclick="resetFeaturedForm()" class="text-[10px] mono subtle hover:text-white">Clear</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <label class="lg:col-span-2 text-[10px] subtle">Contract address
+            <input id="featuredAddressInput" required maxlength="42" placeholder="0x…" class="mt-1 w-full bg-ink-950 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono text-white">
+          </label>
+          <label class="text-[10px] subtle">Symbol
+            <input id="featuredSymbolInput" required maxlength="32" placeholder="DCAI" class="mt-1 w-full bg-ink-950 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono text-white">
+          </label>
+          <label class="text-[10px] subtle">Name
+            <input id="featuredNameInput" required maxlength="100" placeholder="Token name" class="mt-1 w-full bg-ink-950 border border-[#232833] rounded-lg px-3 py-2 text-[11px] text-white">
+          </label>
+          <label class="text-[10px] subtle">Type
+            <select id="featuredTypeInput" class="mt-1 w-full bg-ink-950 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono text-white">
+              <option value="erc20">ERC-20</option><option value="erc721">ERC-721</option><option value="erc1155">ERC-1155</option>
+            </select>
+          </label>
+          <label class="text-[10px] subtle">Decimals
+            <input id="featuredDecimalsInput" type="number" min="0" max="255" value="18" class="mt-1 w-full bg-ink-950 border border-[#232833] rounded-lg px-3 py-2 text-[11px] mono text-white">
+          </label>
+          <label class="md:col-span-2 text-[10px] subtle">Note
+            <input id="featuredNoteInput" maxlength="280" placeholder="Optional internal/public note" class="mt-1 w-full bg-ink-950 border border-[#232833] rounded-lg px-3 py-2 text-[11px] text-white">
+          </label>
+        </div>
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <label class="flex items-center gap-2 text-[11px] text-[#a2a9b4]"><input id="featuredEnabledInput" type="checkbox" checked class="accent-[#f0b90b]"> Visible on /tokens</label>
+          <button id="featuredApplyButton" type="submit" class="px-4 py-2 rounded-lg border border-gold/40 text-gold text-[11px] font-bold hover:bg-gold/10">Add to list</button>
+        </div>
+      </form>
+
+      <div id="featuredTokensStatus" class="mt-3 text-[10px] mono subtle">Loading…</div>
+      <div id="featuredTokensTable" class="mt-3"></div>
+    </section>
+
+    </div>
     <div id="tabPanel-infrastructure" role="tabpanel" aria-labelledby="tabButton-infrastructure" data-tab-panel="infrastructure" hidden>
 
     <!-- Health + infra -->
@@ -413,7 +464,7 @@ async function main() {
 
   <script>
     const API_URL = '/admin/api';
-    const ADMIN_TABS = ['overview', 'operators', 'api-access', 'infrastructure', 'security'];
+    const ADMIN_TABS = ['overview', 'operators', 'api-access', 'tokens', 'infrastructure', 'security'];
 
     function setActiveAdminTab(tab, updateHash){
       const active = ADMIN_TABS.includes(tab) ? tab : 'overview';
@@ -561,8 +612,11 @@ async function main() {
     // ---- api keys ----
     async function adminFetch(path, opts){ return await fetch(API_URL + path, opts || {}); }
     let apiKeyRequestsCache = [], apiKeyKeysCache = [], legacyKeysCache = [], stakeWatchCache = [];
+    let featuredTokensCache = [], featuredTokensUpdatedAt = null, featuredTokenEditIndex = -1, featuredTokensDirty = false;
     const TABLE_PAGE_SIZE = 10;
-    const tablePages = { requests:1, history:1, keys:1, legacy:1, stakes:1 };
+    const tablePages = { requests:1, history:1, keys:1, legacy:1, stakes:1, tokens:1 };
+
+    function escapeHtml(value){ return String(value==null?'':value).replace(/[&<>"']/g,function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
 
     function paginateRows(rows, key){
       const items=Array.isArray(rows)?rows:[]; const total=items.length; const totalPages=Math.max(1,Math.ceil(total/TABLE_PAGE_SIZE));
@@ -587,6 +641,59 @@ async function main() {
       else if(key==='keys') renderKeys(apiKeyKeysCache);
       else if(key==='legacy') renderLegacyKeys(legacyKeysCache);
       else if(key==='stakes') renderStakeWatch(stakeWatchCache);
+      else if(key==='tokens') renderFeaturedTokens();
+    }
+
+    function setFeaturedDirty(dirty){
+      featuredTokensDirty=!!dirty;
+      const button=document.getElementById('featuredSaveButton');
+      if(button){ button.textContent=dirty?'Save changes •':'Saved'; button.classList.toggle('bg-gold',dirty); button.classList.toggle('bg-emerald-500',!dirty); }
+    }
+    function resetFeaturedForm(){
+      featuredTokenEditIndex=-1;
+      ['featuredAddressInput','featuredSymbolInput','featuredNameInput','featuredNoteInput'].forEach(function(id){ const el=document.getElementById(id); if(el) el.value=''; });
+      document.getElementById('featuredTypeInput').value='erc20'; document.getElementById('featuredDecimalsInput').value='18'; document.getElementById('featuredEnabledInput').checked=true;
+      document.getElementById('featuredFormTitle').textContent='Add token'; document.getElementById('featuredApplyButton').textContent='Add to list';
+    }
+    function editFeaturedToken(index){
+      const token=featuredTokensCache[index]; if(!token) return; featuredTokenEditIndex=index;
+      document.getElementById('featuredAddressInput').value=token.address||''; document.getElementById('featuredSymbolInput').value=token.symbol||''; document.getElementById('featuredNameInput').value=token.name||'';
+      document.getElementById('featuredTypeInput').value=token.type||'erc20'; document.getElementById('featuredDecimalsInput').value=token.decimals==null?18:token.decimals; document.getElementById('featuredNoteInput').value=token.note||''; document.getElementById('featuredEnabledInput').checked=token.enabled!==false;
+      document.getElementById('featuredFormTitle').textContent='Edit token #'+(index+1); document.getElementById('featuredApplyButton').textContent='Update list'; window.scrollTo({top:document.getElementById('featuredFormTitle').getBoundingClientRect().top+window.scrollY-120,behavior:'smooth'});
+    }
+    function applyFeaturedToken(event){
+      event.preventDefault(); const address=document.getElementById('featuredAddressInput').value.trim();
+      if(!/^0x[0-9a-fA-F]{40}$/.test(address)) return alert('Enter a valid 0x EVM contract address.');
+      const duplicate=featuredTokensCache.findIndex(function(t,i){ return i!==featuredTokenEditIndex && String(t.address).toLowerCase()===address.toLowerCase(); }); if(duplicate>=0) return alert('That contract is already in the list.');
+      const token={ address:address, symbol:document.getElementById('featuredSymbolInput').value.trim(), name:document.getElementById('featuredNameInput').value.trim(), type:document.getElementById('featuredTypeInput').value, decimals:Number(document.getElementById('featuredDecimalsInput').value), note:document.getElementById('featuredNoteInput').value.trim(), enabled:document.getElementById('featuredEnabledInput').checked };
+      if(featuredTokenEditIndex>=0) featuredTokensCache[featuredTokenEditIndex]=token; else featuredTokensCache.push(token);
+      setFeaturedDirty(true); resetFeaturedForm(); tablePages.tokens=Math.ceil(featuredTokensCache.length/TABLE_PAGE_SIZE)||1; renderFeaturedTokens();
+    }
+    function moveFeaturedToken(index,delta){ const target=index+delta; if(target<0||target>=featuredTokensCache.length) return; const item=featuredTokensCache[index]; featuredTokensCache[index]=featuredTokensCache[target]; featuredTokensCache[target]=item; setFeaturedDirty(true); renderFeaturedTokens(); }
+    function toggleFeaturedToken(index){ if(!featuredTokensCache[index]) return; featuredTokensCache[index].enabled=featuredTokensCache[index].enabled===false; setFeaturedDirty(true); renderFeaturedTokens(); }
+    function removeFeaturedToken(index){ const token=featuredTokensCache[index]; if(!token||!confirm('Remove '+(token.symbol||token.address)+' from the featured list?')) return; featuredTokensCache.splice(index,1); if(featuredTokenEditIndex===index) resetFeaturedForm(); else if(featuredTokenEditIndex>index) featuredTokenEditIndex--; setFeaturedDirty(true); renderFeaturedTokens(); }
+    function renderFeaturedTokens(){
+      const el=document.getElementById('featuredTokensTable'); if(!el) return; const pageData=paginateRows(featuredTokensCache,'tokens');
+      if(!featuredTokensCache.length){ el.innerHTML='<div class="text-[11px] subtle mono">No featured tokens. Add one above, then save.</div>'; return; }
+      let h='<div class="overflow-x-auto"><table class="w-full text-left text-[11px]"><thead class="text-[10px] uppercase tracking-widest subtle border-b border-[#232833]"><tr><th class="py-2 pr-4">Order</th><th class="py-2 pr-4">Token</th><th class="py-2 pr-4">Contract</th><th class="py-2 pr-4">Type</th><th class="py-2 pr-4">Visibility</th><th class="py-2">Actions</th></tr></thead><tbody class="divide-y divide-[#1e232b]">';
+      pageData.rows.forEach(function(t,rowIndex){ const i=pageData.start+rowIndex, enabled=t.enabled!==false; h+='<tr><td class="py-2 pr-4 mono subtle">'+(i+1)+'</td><td class="py-2 pr-4"><div class="font-bold text-gold">'+escapeHtml(t.symbol)+'</div><div class="subtle">'+escapeHtml(t.name)+'</div></td><td class="py-2 pr-4 mono text-[#a2a9b4]" title="'+escapeHtml(t.address)+'">'+escapeHtml(String(t.address).slice(0,10)+'…'+String(t.address).slice(-6))+'</td><td class="py-2 pr-4 mono uppercase">'+escapeHtml(t.type)+'</td><td class="py-2 pr-4"><button type="button" data-token-toggle="'+i+'" class="px-2 py-1 rounded border '+(enabled?'border-emerald-500/30 text-emerald-400 bg-emerald-500/10':'border-[#303747] subtle')+'">'+(enabled?'VISIBLE':'HIDDEN')+'</button></td><td class="py-2"><div class="flex flex-wrap gap-1"><button type="button" data-token-up="'+i+'" class="px-2 py-1 rounded border border-[#232833] hover:text-white" title="Move up">↑</button><button type="button" data-token-down="'+i+'" class="px-2 py-1 rounded border border-[#232833] hover:text-white" title="Move down">↓</button><button type="button" data-token-edit="'+i+'" class="px-2 py-1 rounded border border-aqua/30 text-aqua">EDIT</button><button type="button" data-token-remove="'+i+'" class="px-2 py-1 rounded border border-rose-500/30 text-rose-400">REMOVE</button></div></td></tr>'; });
+      h+='</tbody></table></div>'+paginationHtml('tokens',pageData); el.innerHTML=h;
+      Array.from(el.querySelectorAll('[data-token-toggle]')).forEach(function(b){ b.addEventListener('click',function(){ toggleFeaturedToken(Number(b.dataset.tokenToggle)); }); });
+      Array.from(el.querySelectorAll('[data-token-up]')).forEach(function(b){ b.addEventListener('click',function(){ moveFeaturedToken(Number(b.dataset.tokenUp),-1); }); });
+      Array.from(el.querySelectorAll('[data-token-down]')).forEach(function(b){ b.addEventListener('click',function(){ moveFeaturedToken(Number(b.dataset.tokenDown),1); }); });
+      Array.from(el.querySelectorAll('[data-token-edit]')).forEach(function(b){ b.addEventListener('click',function(){ editFeaturedToken(Number(b.dataset.tokenEdit)); }); });
+      Array.from(el.querySelectorAll('[data-token-remove]')).forEach(function(b){ b.addEventListener('click',function(){ removeFeaturedToken(Number(b.dataset.tokenRemove)); }); }); bindPagination(el);
+    }
+    async function loadFeaturedTokens(){
+      const st=document.getElementById('featuredTokensStatus');
+      try{ const r=await adminFetch('/featured-tokens'); const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||'load failed'); featuredTokensCache=Array.isArray(d.featured)?d.featured:[]; featuredTokensUpdatedAt=d.updatedAt||null; tablePages.tokens=1; resetFeaturedForm(); setFeaturedDirty(false); renderFeaturedTokens(); if(st) st.textContent='Loaded '+featuredTokensCache.length+' token(s)'+(featuredTokensUpdatedAt?' · last saved '+new Date(featuredTokensUpdatedAt).toLocaleString():'')+'.'; }
+      catch(e){ if(st) st.textContent='Load failed: '+(e?.message||e); }
+    }
+    async function saveFeaturedTokens(){
+      const st=document.getElementById('featuredTokensStatus'), button=document.getElementById('featuredSaveButton'); if(button){ button.disabled=true; button.textContent='Saving…'; }
+      try{ const r=await adminFetch('/featured-tokens',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({featured:featuredTokensCache})}); const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||'save failed'); featuredTokensCache=d.featured||[]; featuredTokensUpdatedAt=d.updatedAt||null; setFeaturedDirty(false); renderFeaturedTokens(); if(st) st.textContent='Saved '+featuredTokensCache.length+' token(s) · public /tokens updated now.'; }
+      catch(e){ setFeaturedDirty(true); if(st) st.textContent='Save failed: '+(e?.message||e); }
+      finally{ if(button) button.disabled=false; }
     }
 
     function initControls(){
@@ -765,7 +872,7 @@ async function main() {
     // init
     try{ initAdminTabs(); }catch(e){}
     try{ updateLabels(); }catch(e){}
-    try{ loadHealth(); refreshAll(); }catch(e){}
+    try{ loadHealth(); refreshAll(); loadFeaturedTokens(); }catch(e){}
     setInterval(loadHealth, 60000);
   </script>
 </body>

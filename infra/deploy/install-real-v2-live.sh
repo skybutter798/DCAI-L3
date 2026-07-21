@@ -31,6 +31,7 @@ fi
 monitor_files=(
   README.md admin-api.mjs contributor-policy.mjs contributor-policy.test.mjs
   contributor-router.mjs contributor-router.test.mjs gen-dashboard.mjs
+  featured-tokens.mjs featured-tokens.test.mjs
   operator-onboarding.mjs operator-onboarding.test.mjs peer-client.mjs
   peer-client.test.mjs probe-runner.mjs
 )
@@ -70,6 +71,11 @@ for _attempt in $(seq 1 30); do
 done
 curl -fsS http://127.0.0.1:3001/cap >/dev/null
 (cd /opt/dcai/rewards/monitor && node gen-dashboard.mjs)
+
+install -d -m 0755 /var/www/html
+if ! test -f /var/www/html/featured-tokens.json; then
+  install -m 0644 "${stage}/explorer/aurascan-preview/dist/featured-tokens.json" /var/www/html/featured-tokens.json
+fi
 
 rsync -a --delete "${stage}/explorer/aurascan-preview/dist/" /opt/aurascan-explorer/dist/
 docker restart aurascan_preview >/dev/null
