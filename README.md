@@ -2,7 +2,7 @@
 
 This repository documents the current **DCAI AppChain Testnet** deployment (Scheme A: PoA sidechain/appchain) and contains the infra configs used to bring it up.
 
-> Note: **No passwords / private keys / API keys** are committed here.
+> Note: **No passwords / private keys** are committed here.
 
 ## Network parameters
 
@@ -40,26 +40,27 @@ Unified entry (nginx): `https://explorer.dcai.ai`
   - rpc-1: `139.180.188.61` (8545/8546)
   - rpc-2: `207.148.72.238` (8545/8546)
 - **Infra**
-  - infra-1: `139.180.140.143` (nginx, Blockscout backend+frontend, faucet)
+  - infra-1: `139.180.140.143` (nginx unified entry, explorer UI `:3002`, Blockscout backend + legacy frontend `:3000`, faucet, admin dashboard + API `:3001`, RPC API-key usage collector, contributor RPC router)
 - **Indexer / archive node**
   - indexer-node-1: `139.180.141.226`
 
 ## Repo layout
 
 - `genesis/genesis.json` — genesis used across nodes
-- `infra/nginx/` — nginx unified entry config (Explorer + Faucet + RPC proxy)
+- `contracts/` — standalone Solidity contracts (`ApiKeyStake.sol`, `SBtoken.sol`)
+- `apps/ask-mvp/` — Ask MVP web app
+- `explorer/aurascan-preview/` — custom explorer UI served at the unified entry root
+- `rewards/` — contribution rewards stack (contracts, hardhat, monitor + admin API, ops cron, web) — see `rewards/README.md`
+- `infra/nginx/` — nginx unified entry config (Explorer + Faucet + RPC proxy + admin)
 - `infra/blockscout/` — Blockscout docker-compose + cyber theme override snapshot + frontend patch
 - `infra/faucet/` — Faucet docker-compose + source
 - `infra/geth/` — sanitized live runtime snapshots reconstructed from running geth containers
 - `infra/apikey/` — RPC API-key usage collector snapshot
+- `infra/deploy/` — deploy + validation scripts for live rollouts
+- `infra/p2p/` — peer agent (systemd unit + install/verify scripts)
+- `infra/systemd/` — contributor RPC router service unit
 - `scripts/dcai-sweep.sh` — signer fee sweep script (installed on signers via cron)
-- `docs/` — operational notes (WIP)
-
-## Operations quickstart
-
-See `docs/runbook.md`.
-/dcai-sweep.sh` — signer fee sweep script (installed on signers via cron)
-- `docs/` — operational notes (WIP)
+- `docs/` — developer guide + operations runbook
 
 ## Operations quickstart
 
