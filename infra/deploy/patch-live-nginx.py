@@ -4,10 +4,10 @@ import sys
 import tempfile
 
 
-OLD_RPC1 = "  server 139.180.188.61:8545 max_fails=3 fail_timeout=10s;"
-OLD_RPC2 = "  server 207.148.72.238:8545 max_fails=3 fail_timeout=10s;"
-NEW_RPC1 = "  server 139.180.188.61:8545 weight=20 max_fails=3 fail_timeout=10s;"
-NEW_RPC2 = "  server 207.148.72.238:8545 weight=20 max_fails=3 fail_timeout=10s;"
+OLD_RPC1 = "  server 45.76.158.165:8545 max_fails=3 fail_timeout=10s;"
+OLD_RPC2 = "  server 207.148.124.68:8545 max_fails=3 fail_timeout=10s;"
+NEW_RPC1 = "  server 45.76.158.165:8545 weight=20 max_fails=3 fail_timeout=10s;"
+NEW_RPC2 = "  server 207.148.124.68:8545 weight=20 max_fails=3 fail_timeout=10s;"
 ROUTER = "  server 127.0.0.1:3998 weight=2 max_fails=1 fail_timeout=5s;"
 
 

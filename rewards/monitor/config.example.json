@@ -11,7 +11,7 @@
   },
   "indexer": {
     "enabled": false,
-    "url": "http://139.180.140.143:4000/api/v2/health"
+    "url": "http://45.32.113.89:4000/api/v2/health"
   },
   "storage": {
     "enabled": false,

@@ -10,11 +10,11 @@ These files were reconstructed from the **currently running containers** on the 
 - signer-3 — `45.76.145.198` — `0xEB9B32A62DFB67bf0b37A07682DD9DF07859D241`
 
 ### RPC
-- rpc-1 — `139.180.188.61`
-- rpc-2 — `207.148.72.238`
+- rpc-1 — `45.76.158.165`
+- rpc-2 — `207.148.124.68`
 
 ### Indexer / archive
-- indexer-node-1 — `139.180.141.226`
+- indexer-node-1 — `139.180.131.232`
 
 ## Notes
 - `genesis/genesis.json` matches the live signer genesis.

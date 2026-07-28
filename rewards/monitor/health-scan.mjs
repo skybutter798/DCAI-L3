@@ -60,8 +60,8 @@ async function main() {
     adminApi: await timedFetch("http://127.0.0.1:3001/cap", { timeoutMs: 2000 }),
   };
 
-  result.nodes["RPC1"] = { rpc: await rpcCheck("http://139.180.188.61:8545/") };
-  result.nodes["RPC2"] = { rpc: await rpcCheck("http://207.148.72.238:8545/") };
+  result.nodes["RPC1"] = { rpc: await rpcCheck("http://45.76.158.165:8545/") };
+  result.nodes["RPC2"] = { rpc: await rpcCheck("http://207.148.124.68:8545/") };
 
   // TCP reachability checks (SSH port)
   const signerIps = ["45.76.190.151","139.180.188.167","45.76.145.198"]; 
@@ -69,7 +69,7 @@ async function main() {
     result.nodes[`Signer${i+1}`] = { ssh: await tcpCheck(ip, 22, 1500) };
   }
 
-  result.nodes["Indexer"] = { ssh: await tcpCheck("139.180.141.226", 22, 1500) };
+  result.nodes["Indexer"] = { ssh: await tcpCheck("139.180.131.232", 22, 1500) };
 
   fs.writeFileSync("/var/www/html/admin/health.json", JSON.stringify(result, null, 2));
 }

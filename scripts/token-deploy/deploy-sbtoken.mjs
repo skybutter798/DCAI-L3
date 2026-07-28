@@ -51,7 +51,7 @@ function compile(contractPath) {
 }
 
 async function main() {
-  const RPC_URL = getEnv('RPC_URL', 'http://139.180.188.61:8545');
+  const RPC_URL = getEnv('RPC_URL', 'http://45.76.158.165:8545');
   const CHAIN_ID = Number(getEnv('CHAIN_ID', '18441'));
 
   const NAME = getEnv('TOKEN_NAME', 'SBtoken');

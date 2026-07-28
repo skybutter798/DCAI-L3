@@ -11,25 +11,30 @@
 
 ## 2) RPC endpoints
 
-RPC is API-key gated.
+RPC is API-key gated. Keys are issued per tier (`basic`, `pro`, `ultra`) — the
+tier is part of the URL, so use the path that matches the key you were issued.
 
-### Option A (recommended for server/backend): header-based API key
-
-HTTP:
-- `https://explorer.dcai.ai/rpc/`
-
-Add header:
-- `X-API-Key: <YOUR_KEY>`
-
-### Option B (recommended for wallets like MetaMask): API key embedded in URL path
-
-Some wallets cannot set custom headers. Use the path-key form:
+### Path-key form (works everywhere, incl. wallets like MetaMask / OKX)
 
 HTTP:
-- `https://explorer.dcai.ai/rpc/<YOUR_KEY>/`
+- `https://explorer.dcai.ai/rpc/basic/<YOUR_KEY>/`
+- `https://explorer.dcai.ai/rpc/pro/<YOUR_KEY>/`
+- `https://explorer.dcai.ai/rpc/ultra/<YOUR_KEY>/`
 
 WebSocket:
-- `wss://explorer.dcai.ai/ws/<YOUR_KEY>/`
+- `wss://explorer.dcai.ai/ws/basic/<YOUR_KEY>/` (likewise `pro` / `ultra`)
+
+> **The trailing slash is required.** `…/rpc/basic/<KEY>` without it returns 401.
+
+Per-key rate limits: basic 10 r/s, pro 50 r/s, ultra 200 r/s.
+
+> Note: the un-prefixed form `https://explorer.dcai.ai/rpc/<KEY>/` is reserved for
+> internal foundation keys and will return 401 for issued tier keys.
+
+### Header form (foundation/internal keys only)
+
+HTTP `https://explorer.dcai.ai/rpc/` with header `X-API-Key: <KEY>`.
+Issued tier keys are **not** accepted here — use the path-key form above.
 
 > Keep the key private. For production, issue per-partner keys and rotate regularly.
 
@@ -38,7 +43,7 @@ WebSocket:
 1. Open MetaMask → Settings → Networks → Add network
 2. Fill:
    - Network name: `DCAI Testnet`
-   - RPC URL: `https://explorer.dcai.ai/rpc/<YOUR_KEY>/`
+   - RPC URL: `https://explorer.dcai.ai/rpc/basic/<YOUR_KEY>/`
    - Chain ID: `18441`
    - Currency symbol: `tDCAI`
    - Block explorer URL: `https://explorer.dcai.ai/`
@@ -60,7 +65,7 @@ curl -s -X POST https://explorer.dcai.ai/faucet/request \
 ### chainId
 
 ```bash
-curl -s https://explorer.dcai.ai/rpc/<YOUR_KEY>/ \
+curl -s https://explorer.dcai.ai/rpc/basic/<YOUR_KEY>/ \
   -H 'Content-Type: application/json' \
   --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}'
 ```
@@ -68,7 +73,7 @@ curl -s https://explorer.dcai.ai/rpc/<YOUR_KEY>/ \
 ### latest block
 
 ```bash
-curl -s https://explorer.dcai.ai/rpc/<YOUR_KEY>/ \
+curl -s https://explorer.dcai.ai/rpc/basic/<YOUR_KEY>/ \
   -H 'Content-Type: application/json' \
   --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
@@ -78,7 +83,7 @@ curl -s https://explorer.dcai.ai/rpc/<YOUR_KEY>/ \
 ```js
 import { ethers } from "ethers";
 
-const RPC = "https://explorer.dcai.ai/rpc/<YOUR_KEY>/";
+const RPC = "https://explorer.dcai.ai/rpc/basic/<YOUR_KEY>/";
 const provider = new ethers.JsonRpcProvider(RPC, 18441);
 
 console.log("chainId", (await provider.getNetwork()).chainId);

@@ -1,0 +1,11 @@
+[Unit]
+Description=DCAI: restrict geth RPC ports (8545/8546) to the fleet via DOCKER-USER
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dcai-rpc-firewall.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

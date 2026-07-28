@@ -37,12 +37,12 @@ Unified entry (nginx): `https://explorer.dcai.ai`
   - signer-2: `139.180.188.167` — `0x80189D1f1a2b15c1bb1cb1b20d68c777823a8079`
   - signer-3: `45.76.145.198` — `0xEB9B32A62DFB67bf0b37A07682DD9DF07859D241`
 - **RPC**
-  - rpc-1: `139.180.188.61` (8545/8546)
-  - rpc-2: `207.148.72.238` (8545/8546)
+  - rpc-1: `45.76.158.165` (8545/8546)
+  - rpc-2: `207.148.124.68` (8545/8546)
 - **Infra**
-  - infra-1: `139.180.140.143` (nginx unified entry, explorer UI `:3002`, Blockscout backend + legacy frontend `:3000`, faucet, admin dashboard + API `:3001`, RPC API-key usage collector, contributor RPC router)
+  - infra-1: `45.32.113.89` (nginx unified entry, explorer UI `:3002`, Blockscout backend + legacy frontend `:3000`, faucet, admin dashboard + API `:3001`, RPC API-key usage collector, contributor RPC router)
 - **Indexer / archive node**
-  - indexer-node-1: `139.180.141.226`
+  - indexer-node-1: `139.180.131.232`
 
 ## Repo layout
 
@@ -51,7 +51,9 @@ Unified entry (nginx): `https://explorer.dcai.ai`
 - `apps/ask-mvp/` — Ask MVP web app
 - `explorer/aurascan-preview/` — custom explorer UI served at the unified entry root
 - `rewards/` — contribution rewards stack (contracts, hardhat, monitor + admin API, ops cron, web) — see `rewards/README.md`
-- `infra/nginx/` — nginx unified entry config (Explorer + Faucet + RPC proxy + admin)
+- `infra/nginx/` — nginx unified entry config (Explorer + Faucet + RPC proxy + admin), incl. `conf.d/dcai-rpc-usage.conf` which defines the `dcai_rpc_usage` log format the site config depends on
+- `infra/firewall/` — `dcai-rpc-firewall.sh` + systemd unit: restricts geth `8545/8546` to the fleet via the `DOCKER-USER` iptables chain (ufw alone does **not** cover Docker-published ports)
+- `infra/docker/daemon.json`, `infra/logrotate/` — container log size caps (json-file `max-size`/`max-file`) plus a logrotate rule for existing containers
 - `infra/blockscout/` — Blockscout docker-compose + cyber theme override snapshot + frontend patch
 - `infra/faucet/` — Faucet docker-compose + source
 - `infra/geth/` — sanitized live runtime snapshots reconstructed from running geth containers

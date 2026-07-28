@@ -7,7 +7,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../.
 const contractPath = path.join(ROOT, 'contracts', 'SurveyPassNFT.sol');
 const contractSource = fs.readFileSync(contractPath, 'utf8');
 
-const RPC_URL = process.env.RPC_URL || 'http://139.180.188.61:8545';
+const RPC_URL = process.env.RPC_URL || 'http://45.76.158.165:8545';
 const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY;
 const TREASURY = process.env.TREASURY || '0xae201c3daacd53e4cb305fa91678b16cc7eae43a';
 const BASE_URI = process.env.BASE_URI || 'https://ask.skybutter.com/nft/meta.php?tokenId=';

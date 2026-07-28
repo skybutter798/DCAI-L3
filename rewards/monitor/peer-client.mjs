@@ -1,8 +1,8 @@
 import { isIP } from 'node:net';
 
 export const DEFAULT_PEER_AGENTS = [
-  'http://139.180.188.61:3090',
-  'http://207.148.72.238:3090',
+  'http://45.76.158.165:3090',
+  'http://207.148.124.68:3090',
 ];
 
 const ENODE_RE = /^enode:\/\/([0-9a-f]{128})@((?:\d{1,3}\.){3}\d{1,3}):(\d{1,5})$/i;

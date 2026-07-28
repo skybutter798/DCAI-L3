@@ -34,7 +34,7 @@ function readEnvFileValue(path, key) {
 
 // --- Existing monitor/admin config ---
 const CONFIG_PATH = '/opt/dcai/rewards/monitor/config.json';
-const RPC_URL = process.env.RPC_URL || 'http://139.180.188.61:8545';
+const RPC_URL = process.env.RPC_URL || 'http://45.76.158.165:8545';
 const DISTRIBUTOR_ADDR = '0x728f2C63b9A0ff0918F5ffB3D4C2d004107476B7';
 const PRIVATE_KEY = process.env.FOUNDATION_KEY;
 const CONTRACT_OWNER_KEY = process.env.CONTRACT_OWNER_KEY || readEnvFileValue('/opt/dcai/rewards/.env', 'PRIVATE_KEY');

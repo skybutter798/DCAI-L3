@@ -12,8 +12,8 @@ return [
             'decimals' => 18,
         ],
         'rpcUrls' => [
-            'http://139.180.188.61:8545',
-            'http://207.148.72.238:8545',
+            'http://45.76.158.165:8545',
+            'http://207.148.124.68:8545',
         ],
         'blockExplorerUrls' => [
             'https://explorer.dcai.ai/',

@@ -4,7 +4,7 @@ set -euo pipefail
 token="$(sed -n 's/^P2P_AGENT_TOKEN=//p' /opt/dcai/rewards/.env)"
 test -n "${token}"
 
-for url in http://139.180.188.61:3090 http://207.148.72.238:3090; do
+for url in http://45.76.158.165:3090 http://207.148.124.68:3090; do
   status="$(curl -fsS --connect-timeout 5 --max-time 10 \
     -H "Authorization: Bearer ${token}" "${url}/v1/status")"
   AGENT_URL="${url}" STATUS_JSON="${status}" python3 - <<'PY'

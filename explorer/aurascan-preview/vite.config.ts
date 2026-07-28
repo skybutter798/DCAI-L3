@@ -8,16 +8,16 @@ import {defineConfig} from 'vite';
 // by nginx.conf (same paths).
 const liveProxy = {
   '/api': {
-    target: 'http://139.180.140.143:4000',
+    target: 'http://45.32.113.89:4000',
     changeOrigin: true,
   },
   '/noderpc': {
-    target: 'http://139.180.188.61:8545',
+    target: 'http://45.76.158.165:8545',
     changeOrigin: true,
     rewrite: (p: string) => p.replace(/^\/noderpc/, ''),
   },
   '/admin/api': {
-    target: 'http://139.180.140.143',
+    target: 'http://45.32.113.89',
     changeOrigin: true,
   },
 };

@@ -1,7 +1,7 @@
 {
   "network": "DCAI L3",
   "chainId": 18441,
-  "rpcUrl": "http://139.180.188.61:8545",
+  "rpcUrl": "http://45.76.158.165:8545",
   "deployer": "0xb7A789805f1EbeD8DC9cb3B7dD9FA4dC3B99E67c",
   "treasury": "0xae201c3daacd53e4cb305fa91678b16cc7eae43a",
   "baseUri": "https://ask.skybutter.com/nft/meta.php?tokenId=",

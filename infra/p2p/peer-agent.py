@@ -15,7 +15,7 @@ ENV_PATH = os.environ.get("PEER_AGENT_ENV", "/etc/dcai-p2p-agent.env")
 ALLOWED_CLIENTS = {
     value.strip()
     for value in os.environ.get(
-        "PEER_AGENT_ALLOWED_IPS", "139.180.140.143,127.0.0.1,::1"
+        "PEER_AGENT_ALLOWED_IPS", "45.32.113.89,127.0.0.1,::1"
     ).split(",")
     if value.strip()
 }

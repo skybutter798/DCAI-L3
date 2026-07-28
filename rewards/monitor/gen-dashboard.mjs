@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { ethers } from 'ethers';
 import { CONTRIBUTOR_TIERS, policyForOperator } from './contributor-policy.mjs';
 
-const RPC_URL = process.env.RPC_URL || 'http://139.180.188.61:8545';
+const RPC_URL = process.env.RPC_URL || 'http://45.76.158.165:8545';
 const DASHBOARD_OUTPUT = process.env.DASHBOARD_OUTPUT || '/var/www/html/admin/index.html';
 const TREASURY_ADDR = '0xae201c3daacd53e4cb305fa91678b16cc7eae43a';
 const DISTRIBUTOR_ADDR = '0x728f2C63b9A0ff0918F5ffB3D4C2d004107476B7';
@@ -12,10 +12,10 @@ const INFRA = [
   { name: 'Signer 1 (Sealer)', ip: '45.76.190.151', role: 'Consensus', type: 'Core' },
   { name: 'Signer 2 (Sealer)', ip: '139.180.188.167', role: 'Consensus', type: 'Core' },
   { name: 'Signer 3 (Sealer)', ip: '45.76.145.198', role: 'Consensus', type: 'Core' },
-  { name: 'RPC 1 (Gateway)', ip: '139.180.188.61', role: 'API/HTTP', type: 'Gate' },
-  { name: 'RPC 2 (Gateway)', ip: '207.148.72.238', role: 'API/HTTP', type: 'Gate' },
-  { name: 'Indexer Node', ip: '139.180.141.226', role: 'Indexer', type: 'L3' },
-  { name: 'Infra (Explorer/Faucet)', ip: '139.180.140.143', role: 'Public UI', type: 'Hub' }
+  { name: 'RPC 1 (Gateway)', ip: '45.76.158.165', role: 'API/HTTP', type: 'Gate' },
+  { name: 'RPC 2 (Gateway)', ip: '207.148.124.68', role: 'API/HTTP', type: 'Gate' },
+  { name: 'Indexer Node', ip: '139.180.131.232', role: 'Indexer', type: 'L3' },
+  { name: 'Infra (Explorer/Faucet)', ip: '45.32.113.89', role: 'Public UI', type: 'Hub' }
 ];
 
 async function main() {
@@ -571,7 +571,7 @@ async function main() {
         for (const row of rows) { const cls=row.status==='OK'?'text-emerald-400':'text-rose-400'; h += '<tr><td class="py-2 pr-4 mono text-[#a2a9b4]">'+row.name+'</td><td class="py-2 pr-4 '+cls+' font-bold">'+row.status+'</td><td class="py-2 pr-4 mono subtle">'+(row.ms==null?'':row.ms+'ms')+'</td><td class="py-2 mono subtle truncate">'+(row.info||'')+'</td></tr>'; }
         h += '</tbody></table></div>';
         const el = document.getElementById('healthTable'); if (el) el.innerHTML = h;
-        const byIp = { '45.76.190.151':d.nodes?.Signer1?.ssh, '139.180.188.167':d.nodes?.Signer2?.ssh, '45.76.145.198':d.nodes?.Signer3?.ssh, '139.180.188.61':d.nodes?.RPC1?.rpc, '207.148.72.238':d.nodes?.RPC2?.rpc, '139.180.141.226':d.nodes?.Indexer?.ssh, '139.180.140.143':d.nodes?.Infra?.nginx };
+        const byIp = { '45.76.190.151':d.nodes?.Signer1?.ssh, '139.180.188.167':d.nodes?.Signer2?.ssh, '45.76.145.198':d.nodes?.Signer3?.ssh, '45.76.158.165':d.nodes?.RPC1?.rpc, '207.148.124.68':d.nodes?.RPC2?.rpc, '139.180.131.232':d.nodes?.Indexer?.ssh, '45.32.113.89':d.nodes?.Infra?.nginx };
         for (const [ip,obj] of Object.entries(byIp)) { const id=ip.replaceAll('.','_'); const ok=obj?.ok===true; const ms=obj?.ms!=null?Math.round(obj.ms):null; const ts=d.generatedAt?new Date(d.generatedAt).toLocaleTimeString():'';
           const dot=document.getElementById('dot_'+id), st=document.getElementById('st_'+id), tsEl=document.getElementById('ts_'+id), msEl=document.getElementById('ms_'+id);
           if(dot){ dot.className='w-1.5 h-1.5 rounded-full ' + (ok?'bg-emerald-500':'bg-rose-500'); }
