@@ -1,6 +1,8 @@
 # DCAI-L3 (Testnet)
 
-This repository documents the current **DCAI AppChain Testnet** deployment (Scheme A: PoA sidechain/appchain) and contains the infra configs used to bring it up.
+> **⛔ DECOMMISSIONED 2026-08-05.** The testnet has been shut down and all servers destroyed. This repo is preserved as the complete rebuild source (configs, apps, docs — no secrets, no chain data). Final state and rebuild checklist: [`DECOMMISSION.md`](DECOMMISSION.md). Host IPs and endpoints below are historical.
+
+This repository documents the final **DCAI AppChain Testnet** deployment (Scheme A: PoA sidechain/appchain) and contains the infra configs used to bring it up.
 
 > Note: **No passwords / private keys** are committed here.
 
@@ -61,8 +63,11 @@ Unified entry (nginx): `https://explorer.dcai.ai`
 - `infra/deploy/` — deploy + validation scripts for live rollouts
 - `infra/p2p/` — peer agent (systemd unit + install/verify scripts)
 - `infra/systemd/` — contributor RPC router service unit
-- `scripts/dcai-sweep.sh` — signer fee sweep script (installed on signers via cron)
+- `scripts/dcai-sweep.sh` — signer fee sweep script (installed on signers via cron; per-signer `FROM`)
+- `scripts/dcai-status-check.sh` — infra-1 fleet/explorer lag-check cron
+- `infra/nginx/maintenance/` — "server expired" takedown mask used 2026-08-01 → decommission
 - `docs/` — developer guide + operations runbook
+- `DECOMMISSION.md` — final chain state + fresh-testnet rebuild checklist
 
 ## Operations quickstart
 
