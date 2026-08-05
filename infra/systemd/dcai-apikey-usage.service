@@ -1,0 +1,14 @@
+[Unit]
+Description=DCAI API Key Usage Collector (nginx rpc_access.log -> usage.json)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dcai/apikey
+ExecStart=/usr/bin/node /opt/dcai/apikey/usage-collector.mjs
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

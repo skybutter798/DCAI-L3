@@ -1,0 +1,19 @@
+[Unit]
+Description=DCAI Admin Dashboard API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dcai/rewards/monitor
+ExecStart=/usr/bin/node /opt/dcai/rewards/monitor/admin-api.mjs
+Restart=always
+# Secrets sanitized for the repo. The live unit carried the real values inline;
+# on a rebuild prefer `EnvironmentFile=/etc/dcai-admin-api.env` (mode 600) so
+# the key/token never sit in a unit file.
+Environment=FOUNDATION_KEY=<FOUNDATION_PRIVATE_KEY>
+Environment=ADMIN_TOKEN=<ADMIN_TOKEN>
+Environment=STAKE_CONTRACT=0x54ff6c64f1f7915a3aD54743aDd92b32412B06BC
+
+[Install]
+WantedBy=multi-user.target
