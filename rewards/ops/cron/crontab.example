@@ -1,8 +1,18 @@
-# Example: publish whenever a new /opt/dcai/rewards/inbox/claims.json is prepared
-# (You will likely generate that file from your scoring service.)
+# Live infra-1 crontab as of decommission (2026-08-05), sanitized.
+# Secrets come from /opt/dcai/rewards/.env (mode 600), sourced inline by the
+# epoch job. Variables it must define: RPC_URL (direct node RPC, NOT the shared
+# gateway — publish-epoch.sh refuses the gateway), PRIVATE_KEY (publisher /
+# foundation key), DISTRIBUTOR_ADDRESS, CLAIMS_JSON, OUT_JSON, P2P_AGENT_TOKEN.
 
-# Every 10 minutes (adjust as desired)
-*/10 * * * * RPC_URL='https://explorer.dcai.ai/rpc/<KEY>/' PRIVATE_KEY='0x...' DISTRIBUTOR_ADDRESS='0x...' CLAIMS_JSON='/opt/dcai/rewards/inbox/claims.json' OUT_JSON='/opt/dcai/rewards/out/epoch-out.json' /opt/dcai/rewards/publish-epoch.sh >> /opt/dcai/rewards/cron.log 2>&1
+# Fleet + explorer lag check, every 5 minutes (see scripts/dcai-status-check.sh)
+*/5 * * * * /usr/local/bin/dcai-status-check.sh >> /var/log/dcai-status.log 2>&1
 
-# Full pipeline example: probe -> score -> publish
-# */10 * * * * RPC_URL='https://explorer.dcai.ai/rpc/<KEY>/' PRIVATE_KEY='0x...' DISTRIBUTOR_ADDRESS='0x...' CONFIG_JSON='/opt/dcai/rewards/monitor/config.json' MEASUREMENTS_JSON='/opt/dcai/rewards/inbox/measurements.json' CLAIMS_JSON='/opt/dcai/rewards/inbox/claims.json' OUT_JSON='/opt/dcai/rewards/out/epoch-out.json' /opt/dcai/rewards/run-epoch.sh >> /opt/dcai/rewards/cron.log 2>&1
+# Rewards epoch publish, every 2 hours. Runs probe -> score -> merkle -> publish
+# on-chain with the foundation key, so this MUST run on exactly one server.
+0 */2 * * * set -a; . /opt/dcai/rewards/.env; set +a; /opt/dcai/rewards/run-epoch.sh >> /opt/dcai/rewards/cron.log 2>&1
+
+# Admin dashboard regeneration -> /var/www/html/admin/index.html, every minute
+* * * * * cd /opt/dcai/rewards/monitor && node gen-dashboard.mjs >> /tmp/dash.log 2>&1
+
+# Fleet health scan -> /var/www/html/admin/health.json, every minute
+* * * * * node /opt/dcai/rewards/monitor/health-scan.mjs >> /tmp/health-scan.log 2>&1

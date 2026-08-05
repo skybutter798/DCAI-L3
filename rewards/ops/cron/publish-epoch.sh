@@ -28,6 +28,13 @@ ARCHIVE_DIR=${ARCHIVE_DIR:-"/var/www/html/rewards/epochs"}
 FULL_CONFIG_JSON=${FULL_CONFIG_JSON:-"$ROOT_DIR/monitor/config.json"}
 PRIVATE_CONFIG_ARCHIVE_DIR=${PRIVATE_CONFIG_ARCHIVE_DIR:-"$ROOT_DIR/archive/config"}
 
+case "${RPC_URL:-}" in
+  http://45.32.113.89/rpc/*|https://45.32.113.89/rpc/*|http://explorer.dcai.ai/rpc/*|https://explorer.dcai.ai/rpc/*)
+    echo "[publish-epoch] refusing shared RPC URL for signing: $RPC_URL" >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "$(dirname "$OUT_JSON")"
 mkdir -p "$(dirname "$PUBLISH_JSON")"
 mkdir -p "$ARCHIVE_DIR"

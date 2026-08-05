@@ -1,33 +1,32 @@
 {
   "rpc": {
-    "url": "https://explorer.dcai.ai/rpc/<KEY>/",
     "timeoutMs": 2000,
-    "samplesPerEpoch": 10,
+    "samplesPerEpoch": 5,
     "methods": [
-      {"name": "eth_chainId", "params": []},
-      {"name": "eth_blockNumber", "params": []},
-      {"name": "net_peerCount", "params": []}
-    ]
-  },
-  "indexer": {
-    "enabled": false,
-    "url": "http://45.32.113.89:4000/api/v2/health"
-  },
-  "storage": {
-    "enabled": false,
-    "url": "http://<STORAGE_ENDPOINT>/health"
-  },
-  "multiregion": {
-    "enabled": false,
-    "regions": [
-      {"name": "rpc1", "url": "https://explorer.dcai.ai/rpc1/"},
-      {"name": "rpc2", "url": "https://explorer.dcai.ai/rpc2/"}
+      { "name": "eth_chainId", "params": [] },
+      { "name": "eth_blockNumber", "params": [] }
     ]
   },
   "operators": [
     {
-      "operator": "0x6B876620391BD2A1281247B1fC15ae4994D50663",
-      "services": {"rpc": true, "indexer": true, "storage": true, "multiregion": true}
+      "operator": "0x0000000000000000000000000000000000000000",
+      "services": {
+        "rpc": true,
+        "indexer": false,
+        "storage": false,
+        "multiregion": false
+      },
+      "endpoints": {
+        "rpc": "https://<gateway-domain>/op/<operator-route>/rpc/<API_KEY>/",
+        "indexer": "http://127.0.0.1:4000",
+        "storage": "http://<operator-host>/health"
+      }
     }
-  ]
+  ],
+  "weights": {
+    "rpc": 40,
+    "indexer": 20,
+    "storage": 30,
+    "multiregion": 10
+  }
 }
